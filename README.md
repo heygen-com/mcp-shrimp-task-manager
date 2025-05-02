@@ -1,5 +1,7 @@
 [English](README.md) | [中文](docs/zh/README.md)
 
+> **Note:** This is a fork of the original `cjo4m06/mcp-shrimp-task-manager` repository, managed by Heygen and potentially containing custom modifications.
+
 ## 目錄
 
 - [✨ Features](#features1)
@@ -356,6 +358,10 @@ After configuration, you can use the following tools:
 | **Task Execution**      | `execute_task`       | Execute specific tasks                           |
 |                         | `verify_task`        | Verify task completion                           |
 |                         | `complete_task`      | Mark tasks as completed                          |
+| **Debugging**           | `log_data_dir`       | Log the path to the tasks.json file              |
+
+> **Note on Custom Tools (Heygen Fork):** This fork may include additional custom tools not present in the original repository. Currently, it includes:
+> - `log_data_dir`: A debugging tool to log the absolute path being used for `tasks.json` based on the `DATA_DIR` configuration.
 
 ## 🔧 Technical Implementation
 
