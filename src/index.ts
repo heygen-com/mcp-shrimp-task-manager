@@ -57,6 +57,9 @@ import {
   initProjectRulesSchema,
 } from "./tools/projectTools.js";
 
+// 導入偵錯工具
+import { logDataDir, logDataDirSchema } from "./tools/debugTools.js";
+
 async function main() {
   try {
     console.log("Starting Shrimp Task Manager service...");
@@ -296,6 +299,11 @@ async function main() {
             ),
             inputSchema: zodToJsonSchema(initProjectRulesSchema),
           },
+          {
+            name: "log_data_dir",
+            description: "Logs the absolute path to the tasks.json file being used by the task manager.",
+            inputSchema: zodToJsonSchema(logDataDirSchema),
+          },
         ],
       };
     });
@@ -452,6 +460,8 @@ async function main() {
               return await processThought(parsedArgs.data);
             case "init_project_rules":
               return await initProjectRules();
+            case "log_data_dir":
+              return await logDataDir();
             default:
               throw new Error(`Tool ${request.params.name} does not exist`);
           }
