@@ -36,6 +36,12 @@ export interface TaskAttempt {
   error?: string; // 如果失敗，記錄錯誤訊息
 }
 
+// 新增介面：記錄專家建議
+export interface ExpertSuggestion {
+  timestamp: Date; // 建議的時間戳
+  advice: string; // 專家提供的建議內容
+}
+
 // 任務介面：定義任務的完整數據結構
 export interface Task {
   id: string; // 任務的唯一標識符
@@ -61,6 +67,9 @@ export interface Task {
 
   // 新增欄位：記錄任務嘗試歷史
   attemptHistory?: TaskAttempt[]; // 記錄執行嘗試的列表 (選填)
+
+  // 新增欄位：記錄專家建議
+  expertSuggestions?: ExpertSuggestion[]; // 記錄專家建議的列表 (選填)
 }
 
 // 規劃任務的參數：用於初始化任務規劃階段

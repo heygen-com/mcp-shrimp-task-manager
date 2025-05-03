@@ -59,6 +59,15 @@ export function getExecuteTaskPrompt(params: ExecuteTaskPromptParams): string {
   const { task, complexityAssessment, relatedFilesSummary, dependencyTasks } =
     params;
 
+  // *** Add logic for Expert Suggestions ***
+  let formattedExpertSuggestion = "";
+  if (task.expertSuggestions && task.expertSuggestions.length > 0) {
+      const latestSuggestion = task.expertSuggestions[task.expertSuggestions.length - 1];
+      // Format the suggestion nicely for the prompt
+      formattedExpertSuggestion = `## Expert Suggestion (from ${latestSuggestion.timestamp.toISOString()})\n\n${latestSuggestion.advice}\n\n---\n`;
+  }
+  // *** End Expert Suggestions logic ***
+
   const notesTemplate = loadPromptFromTemplate("executeTask/notes.md");
   let notesPrompt = "";
   if (task.notes) {
@@ -164,6 +173,9 @@ export function getExecuteTaskPrompt(params: ExecuteTaskPromptParams): string {
     relatedFilesSummaryTemplate: relatedFilesSummaryPrompt,
     complexityTemplate: complexityPrompt,
   });
+
+  // Inject the expert suggestion at the beginning of the prompt
+  prompt = formattedExpertSuggestion + prompt;
 
   // 載入可能的自定義 prompt
   return loadPrompt(prompt, "EXECUTE_TASK");

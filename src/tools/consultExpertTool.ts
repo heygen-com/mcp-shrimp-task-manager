@@ -2,9 +2,12 @@ import { z } from 'zod';
 import { OpenAI } from 'openai';
 import { logToFile } from '../utils/logUtils.js'; // Import logging utility
 import { loadPromptFromTemplate } from '../prompts/loader.js'; // Corrected import path
+import { getTaskById, updateTask } from '../models/taskModel.js'; // <-- Import task model functions
+import { ExpertSuggestion } from '../types/index.js'; // <-- Import ExpertSuggestion type
 
 // Define the input schema for the tool using Zod
 export const ConsultExpertInputSchema = z.object({
+  taskId: z.string().uuid({ message: "請提供有效的任務ID (UUID格式)" }).describe("需要協助的任務ID"),
   problem_description: z.string().describe('A clear description of the problem or question the agent is stuck on.'),
   relevant_context: z.string().describe('Relevant context like code snippets, error messages, previous steps, or task details.'),
   task_goal: z.string().optional().describe('The overall goal the agent is trying to achieve.'),
@@ -45,7 +48,7 @@ async function callOpenAI(prompt: string): Promise<string> {
 export async function consultExpert(params: z.infer<typeof ConsultExpertInputSchema>): Promise<string> {
   await logToFile(`[consultExpert] Function started with params: ${JSON.stringify(params)}`);
 
-  const { problem_description, relevant_context, task_goal } = params;
+  const { taskId, problem_description, relevant_context, task_goal } = params;
 
   // --- Load prompt components dynamically --- 
   let framingTemplate = "tools/consultExpert/framing_default.md";
@@ -93,12 +96,37 @@ export async function consultExpert(params: z.infer<typeof ConsultExpertInputSch
 
   await logToFile(`[consultExpert] Constructed prompt (length: ${prompt.length}). Calling callOpenAI...`);
   // Call the expert AI
-  const suggestion = await callOpenAI(prompt);
+  const expertAdvice = await callOpenAI(prompt);
 
-  await logToFile(`[consultExpert] Received suggestion from callOpenAI. Formatting response.`);
+  await logToFile(`[consultExpert] Received advice from callOpenAI. Attempting to persist advice to task ${taskId}.`);
+  
+  // *** Persist advice to task ***
+  try {
+    const task = await getTaskById(taskId);
+    if (task) {
+      const newSuggestion: ExpertSuggestion = { 
+        timestamp: new Date(), 
+        advice: expertAdvice // Store the raw advice 
+      };
+      const existingSuggestions = task.expertSuggestions || [];
+      const updatedSuggestions = [...existingSuggestions, newSuggestion];
+      await updateTask(taskId, { expertSuggestions: updatedSuggestions });
+      await logToFile(`[consultExpert] Successfully persisted advice to task ${taskId}.`);
+    } else {
+      await logToFile(`[consultExpert] Warning: Task ${taskId} not found. Could not persist advice.`);
+    }
+  } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await logToFile(`[consultExpert] Error persisting advice to task ${taskId}: ${message}`);
+      // Decide if this error should be surfaced to the agent or just logged.
+      // For now, log and continue, returning the advice anyway.
+  }
+  // *** End Persist advice ***
+
+  await logToFile(`[consultExpert] Formatting response.`);
   // Return the suggestion
   // Prefix changed slightly to be more general
-  const finalResponse = `Expert Response:\n${suggestion}`; 
+  const finalResponse = `Expert Response:\n${expertAdvice}`;
   await logToFile(`[consultExpert] Returning final response (length: ${finalResponse.length})`);
   return finalResponse;
 } 
