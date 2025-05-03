@@ -39,6 +39,8 @@ import {
   executeTaskSchema,
   verifyTask,
   verifyTaskSchema,
+  reportTaskResult,
+  reportTaskResultSchema,
   completeTask,
   completeTaskSchema,
   deleteTask,
@@ -209,6 +211,7 @@ async function main() {
           { name: "list_tasks", description: loadPromptFromTemplate("toolsDescription/listTasks.md"), inputSchema: zodToJsonSchema(listTasksSchema) },
           { name: "execute_task", description: loadPromptFromTemplate("toolsDescription/executeTask.md"), inputSchema: zodToJsonSchema(executeTaskSchema) },
           { name: "verify_task", description: loadPromptFromTemplate("toolsDescription/verifyTask.md"), inputSchema: zodToJsonSchema(verifyTaskSchema) },
+          { name: "report_task_result", description: loadPromptFromTemplate("toolsDescription/reportTaskResult.md"), inputSchema: zodToJsonSchema(reportTaskResultSchema) },
           { name: "complete_task", description: loadPromptFromTemplate("toolsDescription/completeTask.md"), inputSchema: zodToJsonSchema(completeTaskSchema) },
           { name: "delete_task", description: loadPromptFromTemplate("toolsDescription/deleteTask.md"), inputSchema: zodToJsonSchema(deleteTaskSchema) },
           { name: "clear_all_tasks", description: loadPromptFromTemplate("toolsDescription/clearAllTasks.md"), inputSchema: zodToJsonSchema(clearAllTasksSchema) },
@@ -267,6 +270,10 @@ async function main() {
             case "verify_task":
               parsedArgs = await verifyTaskSchema.parseAsync(request.params.arguments);
               result = await verifyTask(parsedArgs);
+              break;
+            case "report_task_result":
+              parsedArgs = await reportTaskResultSchema.parseAsync(request.params.arguments);
+              result = await reportTaskResult(parsedArgs);
               break;
             case "complete_task":
               parsedArgs = await completeTaskSchema.parseAsync(request.params.arguments);

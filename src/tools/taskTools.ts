@@ -14,6 +14,9 @@ import {
   updateTaskContent as modelUpdateTaskContent,
   updateTaskRelatedFiles as modelUpdateTaskRelatedFiles,
   searchTasksWithCommand,
+  startTaskAttempt,
+  recordTaskAttemptResult,
+  detectTaskLoop,
 } from "../models/taskModel.js";
 import {
   TaskStatus,
@@ -520,136 +523,96 @@ export const executeTaskSchema = z.object({
 export async function executeTask({
   taskId,
 }: z.infer<typeof executeTaskSchema>) {
-  try {
-    // 檢查任務是否存在
-    const task = await getTaskById(taskId);
-    if (!task) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `找不到ID為 \`${taskId}\` 的任務。請確認ID是否正確。`,
-          },
-        ],
-      };
-    }
+  // 開始執行任務邏輯
+  const task = await getTaskById(taskId);
 
-    // 檢查任務是否可以執行（依賴任務都已完成）
-    const executionCheck = await canExecuteTask(taskId);
-    if (!executionCheck.canExecute) {
-      const blockedByTasksText =
-        executionCheck.blockedBy && executionCheck.blockedBy.length > 0
-          ? `被以下未完成的依賴任務阻擋: ${executionCheck.blockedBy.join(", ")}`
-          : "無法確定阻擋原因";
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `任務 "${task.name}" (ID: \`${taskId}\`) 目前無法執行。${blockedByTasksText}`,
-          },
-        ],
-      };
-    }
-
-    // 如果任務已經標記為「進行中」，提示用戶
-    if (task.status === TaskStatus.IN_PROGRESS) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `任務 "${task.name}" (ID: \`${taskId}\`) 已經處於進行中狀態。`,
-          },
-        ],
-      };
-    }
-
-    // 如果任務已經標記為「已完成」，提示用戶
-    if (task.status === TaskStatus.COMPLETED) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `任務 "${task.name}" (ID: \`${taskId}\`) 已經標記為完成。如需重新執行，請先使用 delete_task 刪除該任務並重新創建。`,
-          },
-        ],
-      };
-    }
-
-    // 更新任務狀態為「進行中」
-    await updateTaskStatus(taskId, TaskStatus.IN_PROGRESS);
-
-    // 評估任務複雜度
-    const complexityResult = await assessTaskComplexity(taskId);
-
-    // 將複雜度結果轉換為適當的格式
-    const complexityAssessment = complexityResult
-      ? {
-          level: complexityResult.level,
-          metrics: {
-            descriptionLength: complexityResult.metrics.descriptionLength,
-            dependenciesCount: complexityResult.metrics.dependenciesCount,
-          },
-          recommendations: complexityResult.recommendations,
-        }
-      : undefined;
-
-    // 獲取依賴任務，用於顯示完成摘要
-    const dependencyTasks: Task[] = [];
-    if (task.dependencies && task.dependencies.length > 0) {
-      for (const dep of task.dependencies) {
-        const depTask = await getTaskById(dep.taskId);
-        if (depTask) {
-          dependencyTasks.push(depTask);
-        }
-      }
-    }
-
-    // 加載任務相關的文件內容
-    let relatedFilesSummary = "";
-    if (task.relatedFiles && task.relatedFiles.length > 0) {
-      try {
-        const relatedFilesResult = await loadTaskRelatedFiles(
-          task.relatedFiles
-        );
-        relatedFilesSummary =
-          typeof relatedFilesResult === "string"
-            ? relatedFilesResult
-            : relatedFilesResult.summary || "";
-      } catch (error) {
-        relatedFilesSummary =
-          "Error loading related files, please check the files manually.";
-      }
-    }
-
-    // 使用prompt生成器獲取最終prompt
-    const prompt = getExecuteTaskPrompt({
-      task,
-      complexityAssessment,
-      relatedFilesSummary,
-      dependencyTasks,
-    });
-
+  // 檢查任務是否存在
+  if (!task) {
     return {
       content: [
         {
           type: "text" as const,
-          text: prompt,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `執行任務時發生錯誤: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          text: `## 系統錯誤\n\n找不到ID為 '${taskId}' 的任務。請檢查任務ID是否正確。`,
         },
       ],
     };
   }
+
+  // 檢查任務狀態是否允許執行
+  if (task.status === TaskStatus.COMPLETED) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `## 系統通知\n\n任務 '${task.name}' (ID: ${taskId}) 已經完成，無需再次執行。`,
+        },
+      ],
+    };
+  }
+
+  // 檢查任務依賴是否完成
+  const executionCheck = await canExecuteTask(taskId);
+  if (!executionCheck.canExecute) {
+    const blockingTaskIds = executionCheck.blockedBy || [];
+    const blockingTasks = await Promise.all(
+      blockingTaskIds.map((id) => getTaskById(id))
+    );
+    const blockingTaskInfo = blockingTasks
+      .filter((t) => t !== null)
+      .map((t) => `- ${t!.name} (ID: ${t!.id})`)
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `## 系統通知\n\n任務 '${task.name}' (ID: ${taskId}) 無法執行，因為以下依賴任務尚未完成：\n${blockingTaskInfo}\n\n請先完成依賴任務，或使用 'split_tasks' 工具調整任務依賴關係。`,
+        },
+      ],
+    };
+  }
+
+  // *** 開始任務嘗試 ***
+  const startedTask = await startTaskAttempt(taskId);
+  if (!startedTask) {
+      // Handle error if starting attempt fails (e.g., task disappeared)
+      return {
+          content: [
+              {
+                  type: "text" as const,
+                  text: `## 系統錯誤\n\n嘗試開始執行任務 '${taskId}' 時出錯，任務可能已被刪除。`,
+              },
+          ],
+      };
+  }
+
+  // 評估任務複雜度
+  const complexity = await assessTaskComplexity(taskId);
+
+  // 載入相關文件內容
+  const loadedFilesResult = await loadTaskRelatedFiles(task.relatedFiles || []);
+  const relatedFilesSummary = typeof loadedFilesResult === 'string' ? loadedFilesResult : loadedFilesResult.summary;
+
+  // 使用prompt生成器獲取最終prompt
+  const prompt = getExecuteTaskPrompt({
+    task: startedTask, // Use the task returned by startTaskAttempt
+    complexityAssessment: complexity || undefined, // Convert null to undefined
+    relatedFilesSummary, // Pass the summary string
+  });
+
+  // 返回生成的prompt給AI Agent
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: prompt,
+      },
+    ],
+    ephemeral: {
+      // 可選的後設資料，例如任務複雜度評級
+      taskComplexity: complexity?.level || TaskComplexityLevel.LOW,
+    },
+  };
 }
 
 // 檢驗任務工具
@@ -700,23 +663,108 @@ export async function verifyTask({ taskId }: z.infer<typeof verifyTaskSchema>) {
   };
 }
 
+// 新增：報告任務結果工具
+export const reportTaskResultSchema = z.object({
+  taskId: z.string().uuid({ message: "請提供有效的任務ID (UUID格式)" }),
+  status: z.enum(["succeeded", "failed"], {
+    errorMap: () => ({ message: "狀態必須是 'succeeded' 或 'failed'" }),
+  }),
+  error: z.string().optional().describe("如果狀態是 'failed'，請提供失敗的原因或錯誤信息"),
+});
+
+export async function reportTaskResult({
+  taskId,
+  status,
+  error,
+}: z.infer<typeof reportTaskResultSchema>) {
+  if (status === "failed" && !error) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: "## 參數錯誤\n\n當狀態為 'failed' 時，必須提供 'error' 參數說明失敗原因。",
+        },
+      ],
+    };
+  }
+
+  const updatedTask = await recordTaskAttemptResult(taskId, status, error);
+
+  if (!updatedTask) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `## 系統錯誤\n\n記錄任務 '${taskId}' 結果時出錯，可能是任務ID無效或任務尚未開始執行。`,
+        },
+      ],
+    };
+  }
+
+  // 處理失敗情況
+  if (status === "failed") {
+    const loopDetection = detectTaskLoop(updatedTask, 2);
+
+    if (loopDetection.isLooping) {
+      // TODO: Replace with real prompt generator call
+      const consultPrompt = `## 檢測到循環失敗\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 連續失敗 ${loopDetection.failureHistory.length} 次。最近的錯誤是：\n${loopDetection.failureHistory.map((e, i) => `${i + 1}. ${e}`).join("\n")}\n\n建議呼叫 'consult_expert' 工具，提供任務ID和以上錯誤歷史以尋求協助。`;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: consultPrompt,
+          },
+        ],
+      };
+    } else {
+      // TODO: Replace with real prompt generator call
+      const retryPrompt = `## 任務失敗\n\n執行任務 '${updatedTask.name}' (ID: ${taskId}) 失敗。錯誤：${error}\n\n請分析失敗原因。你可以：\n1. 嘗試修正問題後，再次呼叫 'execute_task' 重試此任務。\n2. 如果問題無法解決或需要調整計劃，請使用 'plan_task' 或 'split_tasks' 修改任務。`;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: retryPrompt,
+          },
+        ],
+      };
+    }
+  }
+
+  // 處理成功情況
+  if (status === "succeeded") {
+    // TODO: Replace with real prompt generator call
+    const completePrompt = `## 任務執行成功\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 已成功執行並通過驗證。\n\n請呼叫 'complete_task' 工具，提供任務ID以標記任務完成並生成摘要。`;
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: completePrompt,
+        },
+      ],
+    };
+  }
+
+  // Default fallback (should not be reached)
+  return {
+    content: [
+        {
+            type: "text" as const,
+            text: "內部錯誤：無法處理的任務結果狀態。",
+        },
+    ],
+  };
+}
+
 // 完成任務工具
 export const completeTaskSchema = z.object({
   taskId: z
     .string()
-    .uuid({ message: "任務ID格式無效，請提供有效的UUID格式" })
-    .describe(
-      "待標記為完成的任務唯一標識符，必須是狀態為「進行中」的有效任務ID"
-    ),
+    .uuid({ message: "請提供有效的任務ID (UUID格式)" })
+    .describe("待標記為完成的任務唯一標識符，必須是狀態為「進行中」的有效任務ID"),
   summary: z
     .string()
-    .min(30, {
-      message: "任務摘要太簡短，請提供更詳細的完成報告，包含實施結果和主要決策",
-    })
     .optional()
-    .describe(
-      "任務完成摘要，簡潔描述實施結果和重要決策（選填，如未提供將自動生成）"
-    ),
+    .describe("任務完成摘要，簡潔描述實施結果和重要決策（選填，如未提供將自動生成）"),
 });
 
 export async function completeTask({
@@ -730,40 +778,48 @@ export async function completeTask({
       content: [
         {
           type: "text" as const,
-          text: `## 系統錯誤\n\n找不到ID為 \`${taskId}\` 的任務。請使用「list_tasks」工具確認有效的任務ID後再試。`,
+          text: `## 系統錯誤\n\n找不到ID為 '${taskId}' 的任務。`,
         },
       ],
-      isError: true,
     };
   }
 
-  if (task.status !== TaskStatus.IN_PROGRESS) {
+  // ** Check if the task was already marked COMPLETED by report_task_result **
+  if (task.status !== TaskStatus.COMPLETED) {
+      // This might indicate an incorrect workflow call (e.g., complete called before success reported)
+      // Optionally, force completion here, or return an error/warning.
+      // For now, let's return a warning and proceed to summary generation.
+      // await updateTaskStatus(taskId, TaskStatus.COMPLETED); // Removed - status set by recordTaskAttemptResult
+       console.warn(`Warning: complete_task called for task ${taskId} which has status ${task.status}, expected COMPLETED.`);
+       // Consider if we should still call updateTaskSummary below or return an error.
+       // For robustness, let's allow summary update even if status is unexpected.
+  }
+
+  // 如果未提供摘要，嘗試自動生成
+  let finalSummary = summary;
+  if (!finalSummary) {
+    // 嘗試從任務描述或其他字段生成
+    finalSummary = await generateTaskSummary(task.name, task.description);
+  }
+
+  // 更新任務摘要
+  const updatedTask = await updateTaskSummary(taskId, finalSummary || "任務已完成");
+
+  if (!updatedTask) {
     return {
       content: [
         {
           type: "text" as const,
-          text: `## 狀態錯誤\n\n任務 "${task.name}" (ID: \`${task.id}\`) 當前狀態為 "${task.status}"，不是進行中狀態，無法標記為完成。\n\n只有狀態為「進行中」的任務才能標記為完成。請先使用「execute_task」工具開始任務執行。`,
+          text: `## 系統錯誤\n\n更新任務 '${taskId}' 的摘要時發生錯誤。`,
         },
       ],
-      isError: true,
     };
   }
 
-  // 處理摘要信息
-  let taskSummary = summary;
-  if (!taskSummary) {
-    // 自動生成摘要
-    taskSummary = generateTaskSummary(task.name, task.description);
-  }
-
-  // 更新任務狀態為已完成，並添加摘要
-  await updateTaskStatus(taskId, TaskStatus.COMPLETED);
-  await updateTaskSummary(taskId, taskSummary);
-
   // 使用prompt生成器獲取最終prompt
   const prompt = getCompleteTaskPrompt({
-    task,
-    completionTime: new Date().toISOString(),
+    task: updatedTask,
+    completionTime: new Date().toISOString(), // Convert Date to string
   });
 
   return {

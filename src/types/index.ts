@@ -29,6 +29,13 @@ export interface RelatedFile {
   lineEnd?: number; // 相關代碼區塊的結束行（選填）
 }
 
+// 新增介面：記錄任務嘗試
+export interface TaskAttempt {
+  timestamp: Date; // 嘗試的時間戳
+  status: "started" | "failed" | "succeeded"; // 嘗試的狀態
+  error?: string; // 如果失敗，記錄錯誤訊息
+}
+
 // 任務介面：定義任務的完整數據結構
 export interface Task {
   id: string; // 任務的唯一標識符
@@ -51,6 +58,9 @@ export interface Task {
 
   // 新增欄位：保存驗證標準和檢驗方法
   verificationCriteria?: string; // 明確的驗證標準、測試要點和驗收條件
+
+  // 新增欄位：記錄任務嘗試歷史
+  attemptHistory?: TaskAttempt[]; // 記錄執行嘗試的列表 (選填)
 }
 
 // 規劃任務的參數：用於初始化任務規劃階段

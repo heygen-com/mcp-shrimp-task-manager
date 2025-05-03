@@ -6,6 +6,7 @@ import {
   TaskComplexityThresholds,
   TaskComplexityAssessment,
   RelatedFile,
+  TaskAttempt,
 } from "../types/index.js";
 import fs from "fs/promises";
 import path from "path";
@@ -492,6 +493,98 @@ export async function canExecuteTask(
     canExecute: blockedBy.length === 0,
     blockedBy: blockedBy.length > 0 ? blockedBy : undefined,
   };
+}
+
+// 新增：開始一次任務嘗試
+export async function startTaskAttempt(
+  taskId: string
+): Promise<Task | null> {
+  const task = await getTaskById(taskId);
+  if (!task) return null;
+
+  const newAttempt: TaskAttempt = {
+    timestamp: new Date(),
+    status: "started",
+  };
+
+  const attemptHistory = task.attemptHistory || [];
+  attemptHistory.push(newAttempt);
+
+  return await updateTask(taskId, {
+    status: TaskStatus.IN_PROGRESS,
+    attemptHistory: attemptHistory,
+  });
+}
+
+// 新增：記錄任務嘗試結果
+export async function recordTaskAttemptResult(
+  taskId: string,
+  status: "succeeded" | "failed",
+  error?: string
+): Promise<Task | null> {
+  const task = await getTaskById(taskId);
+  if (!task || !task.attemptHistory || task.attemptHistory.length === 0) {
+    // Cannot record result if no attempt was started or history is missing
+    return null;
+  }
+
+  const lastAttemptIndex = task.attemptHistory.length - 1;
+  // Ensure the last attempt was marked as 'started'
+  if (task.attemptHistory[lastAttemptIndex].status !== 'started') {
+      // Maybe log a warning here, indicates inconsistent state
+      return task; // Return current task state without modification
+  }
+
+  const updatedAttempt: TaskAttempt = {
+    ...task.attemptHistory[lastAttemptIndex],
+    status: status,
+    timestamp: new Date(), // Update timestamp to reflect completion time
+  };
+
+  if (status === "failed" && error) {
+    updatedAttempt.error = error;
+  }
+
+  const updatedHistory = [...task.attemptHistory];
+  updatedHistory[lastAttemptIndex] = updatedAttempt;
+
+  const updates: Partial<Task> = {
+    attemptHistory: updatedHistory,
+  };
+
+  // Update main task status only if successful
+  if (status === "succeeded") {
+    updates.status = TaskStatus.COMPLETED;
+    updates.completedAt = new Date();
+  }
+  // If failed, main status remains IN_PROGRESS
+
+  return await updateTask(taskId, updates);
+}
+
+// 新增：檢測任務是否陷入循環
+export function detectTaskLoop(
+  task: Task,
+  failureThreshold: number = 3
+): { isLooping: boolean; failureHistory: string[] } {
+  if (
+    !task.attemptHistory ||
+    task.attemptHistory.length < failureThreshold
+  ) {
+    return { isLooping: false, failureHistory: [] };
+  }
+
+  const recentAttempts = task.attemptHistory.slice(-failureThreshold);
+  const allFailed = recentAttempts.every((attempt) => attempt.status === "failed");
+
+  if (allFailed) {
+    const failureHistory = recentAttempts
+      .map((attempt) => attempt.error || "Unknown error")
+      .filter((error): error is string => !!error); // Ensure only strings are included
+    return { isLooping: true, failureHistory };
+  }
+
+  return { isLooping: false, failureHistory: [] };
 }
 
 // 刪除任務
