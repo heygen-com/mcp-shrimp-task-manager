@@ -47,6 +47,7 @@ import {
   getClearAllTasksPrompt,
   getUpdateTaskContentPrompt,
 } from "../prompts/index.js";
+import { logToFile } from "../utils/logUtils.js";
 
 // 開始規劃工具
 export const planTaskSchema = z.object({
@@ -677,7 +678,9 @@ export async function reportTaskResult({
   status,
   error,
 }: z.infer<typeof reportTaskResultSchema>) {
+  await logToFile(`[reportTaskResult] Reporting result for task ${taskId}: status=${status}, error=${error || 'None'}`);
   if (status === "failed" && !error) {
+    await logToFile(`[reportTaskResult] Error: status is 'failed' but no error message provided for task ${taskId}.`);
     return {
       content: [
         {
@@ -691,6 +694,7 @@ export async function reportTaskResult({
   const updatedTask = await recordTaskAttemptResult(taskId, status, error);
 
   if (!updatedTask) {
+    await logToFile(`[reportTaskResult] Error: Failed to record attempt result for task ${taskId}. Task might not exist or history missing.`);
     return {
       content: [
         {
@@ -704,8 +708,10 @@ export async function reportTaskResult({
   // 處理失敗情況
   if (status === "failed") {
     const loopDetection = detectTaskLoop(updatedTask, 2);
+    await logToFile(`[reportTaskResult] Loop detection for task ${taskId}: isLooping=${loopDetection.isLooping}`);
 
     if (loopDetection.isLooping) {
+      await logToFile(`[reportTaskResult] Loop detected for task ${taskId}. Prompting for consult_expert. Failure History: ${JSON.stringify(loopDetection.failureHistory)}`);
       // TODO: Replace with real prompt generator call
       const consultPrompt = `## 檢測到循環失敗\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 連續失敗 ${loopDetection.failureHistory.length} 次。最近的錯誤是：\n${loopDetection.failureHistory.map((e, i) => `${i + 1}. ${e}`).join("\n")}\n\n建議呼叫 'consult_expert' 工具，提供任務ID和以上錯誤歷史以尋求協助。`;
       return {
@@ -717,6 +723,7 @@ export async function reportTaskResult({
         ],
       };
     } else {
+      await logToFile(`[reportTaskResult] Failure reported for task ${taskId}, but not a loop. Prompting for retry/plan adjustment.`);
       // TODO: Replace with real prompt generator call
       const retryPrompt = `## 任務失敗\n\n執行任務 '${updatedTask.name}' (ID: ${taskId}) 失敗。錯誤：${error}\n\n請分析失敗原因。你可以：\n1. 嘗試修正問題後，再次呼叫 'execute_task' 重試此任務。\n2. 如果問題無法解決或需要調整計劃，請使用 'plan_task' 或 'split_tasks' 修改任務。`;
       return {
@@ -732,6 +739,7 @@ export async function reportTaskResult({
 
   // 處理成功情況
   if (status === "succeeded") {
+    await logToFile(`[reportTaskResult] Success reported for task ${taskId}. Prompting for complete_task.`);
     // TODO: Replace with real prompt generator call
     const completePrompt = `## 任務執行成功\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 已成功執行並通過驗證。\n\n請呼叫 'complete_task' 工具，提供任務ID以標記任務完成並生成摘要。`;
     return {
@@ -745,6 +753,7 @@ export async function reportTaskResult({
   }
 
   // Default fallback (should not be reached)
+  await logToFile(`[reportTaskResult] Warning: Reached default fallback for task ${taskId}. Status was ${status}.`);
   return {
     content: [
         {
