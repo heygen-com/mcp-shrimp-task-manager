@@ -14,8 +14,16 @@ import path from "path";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
+import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
+import { logToFile } from './utils/logUtils.js';
 
-// 導入工具函數
+// Import existing tool arrays
+// import { taskTools } from "./tools/taskTools.js";
+// import { thoughtChainTools } from "./tools/thoughtChainTools.js";
+// import { projectTools } from "./tools/projectTools.js";
+// import { debugTools } from "./tools/debugTools.js";
+
+// Import individual tool functions and schemas (existing)
 import {
   planTask,
   planTaskSchema,
@@ -25,8 +33,8 @@ import {
   reflectTaskSchema,
   splitTasks,
   splitTasksSchema,
-  listTasksSchema,
   listTasks,
+  listTasksSchema,
   executeTask,
   executeTaskSchema,
   verifyTask,
@@ -45,24 +53,20 @@ import {
   getTaskDetailSchema,
 } from "./tools/taskTools.js";
 
-// 導入思維鏈工具
-import {
-  processThought,
-  processThoughtSchema,
-} from "./tools/thoughtChainTools.js";
+// Import the new tool function and schema
+// import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
 
-// 導入專案工具
-import {
-  initProjectRules,
-  initProjectRulesSchema,
-} from "./tools/projectTools.js";
+// Import the new tool function and schema
+import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
 
-// 導入偵錯工具
+// Import the new tool function and schema
+import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
+
+// Import the new tool function and schema
 import { logDataDir, logDataDirSchema } from "./tools/debugTools.js";
 
 async function main() {
   try {
-    console.log("Starting Shrimp Task Manager service...");
     const ENABLE_GUI = process.env.ENABLE_GUI === "true";
 
     if (ENABLE_GUI) {
@@ -193,288 +197,156 @@ async function main() {
       }
     );
 
+    // Restore setRequestHandler for ListTools
     server.setRequestHandler(ListToolsRequestSchema, async () => {
+      // Define the list of tools manually
       return {
         tools: [
-          {
-            name: "plan_task",
-            description: loadPromptFromTemplate("toolsDescription/planTask.md"),
-            inputSchema: zodToJsonSchema(planTaskSchema),
-          },
-          {
-            name: "analyze_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/analyzeTask.md"
-            ),
-            inputSchema: zodToJsonSchema(analyzeTaskSchema),
-          },
-          {
-            name: "reflect_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/reflectTask.md"
-            ),
-            inputSchema: zodToJsonSchema(reflectTaskSchema),
-          },
-          {
-            name: "split_tasks",
-            description: loadPromptFromTemplate(
-              "toolsDescription/splitTasks.md"
-            ),
-            inputSchema: zodToJsonSchema(splitTasksSchema),
-          },
-          {
-            name: "list_tasks",
-            description: loadPromptFromTemplate(
-              "toolsDescription/listTasks.md"
-            ),
-            inputSchema: zodToJsonSchema(listTasksSchema),
-          },
-          {
-            name: "execute_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/executeTask.md"
-            ),
-            inputSchema: zodToJsonSchema(executeTaskSchema),
-          },
-          {
-            name: "verify_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/verifyTask.md"
-            ),
-            inputSchema: zodToJsonSchema(verifyTaskSchema),
-          },
-          {
-            name: "complete_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/completeTask.md"
-            ),
-            inputSchema: zodToJsonSchema(completeTaskSchema),
-          },
-          {
-            name: "delete_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/deleteTask.md"
-            ),
-            inputSchema: zodToJsonSchema(deleteTaskSchema),
-          },
-          {
-            name: "clear_all_tasks",
-            description: loadPromptFromTemplate(
-              "toolsDescription/clearAllTasks.md"
-            ),
-            inputSchema: zodToJsonSchema(clearAllTasksSchema),
-          },
-          {
-            name: "update_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/updateTask.md"
-            ),
-            inputSchema: zodToJsonSchema(updateTaskContentSchema),
-          },
-          {
-            name: "query_task",
-            description: loadPromptFromTemplate(
-              "toolsDescription/queryTask.md"
-            ),
-            inputSchema: zodToJsonSchema(queryTaskSchema),
-          },
-          {
-            name: "get_task_detail",
-            description: loadPromptFromTemplate(
-              "toolsDescription/getTaskDetail.md"
-            ),
-            inputSchema: zodToJsonSchema(getTaskDetailSchema),
-          },
-          {
-            name: "process_thought",
-            description: loadPromptFromTemplate(
-              "toolsDescription/processThought.md"
-            ),
-            inputSchema: zodToJsonSchema(processThoughtSchema),
-          },
-          {
-            name: "init_project_rules",
-            description: loadPromptFromTemplate(
-              "toolsDescription/initProjectRules.md"
-            ),
-            inputSchema: zodToJsonSchema(initProjectRulesSchema),
-          },
-          {
-            name: "log_data_dir",
-            description: "Logs the absolute path to the tasks.json file being used by the task manager.",
-            inputSchema: zodToJsonSchema(logDataDirSchema),
-          },
+          { name: "plan_task", description: loadPromptFromTemplate("toolsDescription/planTask.md"), inputSchema: zodToJsonSchema(planTaskSchema) },
+          { name: "analyze_task", description: loadPromptFromTemplate("toolsDescription/analyzeTask.md"), inputSchema: zodToJsonSchema(analyzeTaskSchema) },
+          { name: "reflect_task", description: loadPromptFromTemplate("toolsDescription/reflectTask.md"), inputSchema: zodToJsonSchema(reflectTaskSchema) },
+          { name: "split_tasks", description: loadPromptFromTemplate("toolsDescription/splitTasks.md"), inputSchema: zodToJsonSchema(splitTasksSchema) },
+          { name: "list_tasks", description: loadPromptFromTemplate("toolsDescription/listTasks.md"), inputSchema: zodToJsonSchema(listTasksSchema) },
+          { name: "execute_task", description: loadPromptFromTemplate("toolsDescription/executeTask.md"), inputSchema: zodToJsonSchema(executeTaskSchema) },
+          { name: "verify_task", description: loadPromptFromTemplate("toolsDescription/verifyTask.md"), inputSchema: zodToJsonSchema(verifyTaskSchema) },
+          { name: "complete_task", description: loadPromptFromTemplate("toolsDescription/completeTask.md"), inputSchema: zodToJsonSchema(completeTaskSchema) },
+          { name: "delete_task", description: loadPromptFromTemplate("toolsDescription/deleteTask.md"), inputSchema: zodToJsonSchema(deleteTaskSchema) },
+          { name: "clear_all_tasks", description: loadPromptFromTemplate("toolsDescription/clearAllTasks.md"), inputSchema: zodToJsonSchema(clearAllTasksSchema) },
+          { name: "update_task", description: loadPromptFromTemplate("toolsDescription/updateTask.md"), inputSchema: zodToJsonSchema(updateTaskContentSchema) },
+          { name: "query_task", description: loadPromptFromTemplate("toolsDescription/queryTask.md"), inputSchema: zodToJsonSchema(queryTaskSchema) },
+          { name: "get_task_detail", description: loadPromptFromTemplate("toolsDescription/getTaskDetail.md"), inputSchema: zodToJsonSchema(getTaskDetailSchema) },
+          { name: "process_thought", description: loadPromptFromTemplate("toolsDescription/processThought.md"), inputSchema: zodToJsonSchema(processThoughtSchema) },
+          { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
+          { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
+          // Add the new consult_expert tool
+          { name: "consult_expert", description: 'Consults an external AI expert (OpenAI) when the primary agent is stuck on a problem. Provide the problem description and relevant context to get a suggestion.', inputSchema: zodToJsonSchema(ConsultExpertInputSchema) }, 
         ],
       };
     });
 
+    // Restore setRequestHandler for CallTool
     server.setRequestHandler(
       CallToolRequestSchema,
       async (request: CallToolRequest) => {
+        let result;
+        const toolName = request.params.name;
+        await logToFile(`[Server] Received CallTool request for: ${toolName}`);
+
         try {
           if (!request.params.arguments) {
             throw new Error("No arguments provided");
           }
 
           let parsedArgs;
-          switch (request.params.name) {
+
+          switch (toolName) {
             case "plan_task":
-              parsedArgs = await planTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await planTask(parsedArgs.data);
+              parsedArgs = await planTaskSchema.parseAsync(request.params.arguments);
+              result = await planTask(parsedArgs);
+              break;
             case "analyze_task":
-              parsedArgs = await analyzeTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await analyzeTask(parsedArgs.data);
+              parsedArgs = await analyzeTaskSchema.parseAsync(request.params.arguments);
+              result = await analyzeTask(parsedArgs);
+              break;
             case "reflect_task":
-              parsedArgs = await reflectTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await reflectTask(parsedArgs.data);
+              parsedArgs = await reflectTaskSchema.parseAsync(request.params.arguments);
+              result = await reflectTask(parsedArgs);
+              break;
             case "split_tasks":
-              parsedArgs = await splitTasksSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await splitTasks(parsedArgs.data);
+              parsedArgs = await splitTasksSchema.parseAsync(request.params.arguments);
+              result = await splitTasks(parsedArgs);
+              break;
             case "list_tasks":
-              parsedArgs = await listTasksSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await listTasks(parsedArgs.data);
+              parsedArgs = await listTasksSchema.parseAsync(request.params.arguments);
+              result = await listTasks(parsedArgs);
+              break;
             case "execute_task":
-              parsedArgs = await executeTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await executeTask(parsedArgs.data);
+              parsedArgs = await executeTaskSchema.parseAsync(request.params.arguments);
+              result = await executeTask(parsedArgs);
+              break;
             case "verify_task":
-              parsedArgs = await verifyTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await verifyTask(parsedArgs.data);
+              parsedArgs = await verifyTaskSchema.parseAsync(request.params.arguments);
+              result = await verifyTask(parsedArgs);
+              break;
             case "complete_task":
-              parsedArgs = await completeTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await completeTask(parsedArgs.data);
+              parsedArgs = await completeTaskSchema.parseAsync(request.params.arguments);
+              result = await completeTask(parsedArgs);
+              break;
             case "delete_task":
-              parsedArgs = await deleteTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await deleteTask(parsedArgs.data);
+              parsedArgs = await deleteTaskSchema.parseAsync(request.params.arguments);
+              result = await deleteTask(parsedArgs);
+              break;
             case "clear_all_tasks":
-              parsedArgs = await clearAllTasksSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await clearAllTasks(parsedArgs.data);
+              parsedArgs = await clearAllTasksSchema.parseAsync(request.params.arguments);
+              result = await clearAllTasks(parsedArgs);
+              break;
             case "update_task":
-              parsedArgs = await updateTaskContentSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await updateTaskContent(parsedArgs.data);
+              parsedArgs = await updateTaskContentSchema.parseAsync(request.params.arguments);
+              result = await updateTaskContent(parsedArgs);
+              break;
             case "query_task":
-              parsedArgs = await queryTaskSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await queryTask(parsedArgs.data);
+              parsedArgs = await queryTaskSchema.parseAsync(request.params.arguments);
+              result = await queryTask(parsedArgs);
+              break;
             case "get_task_detail":
-              parsedArgs = await getTaskDetailSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await getTaskDetail(parsedArgs.data);
+              parsedArgs = await getTaskDetailSchema.parseAsync(request.params.arguments);
+              result = await getTaskDetail(parsedArgs);
+              break;
             case "process_thought":
-              parsedArgs = await processThoughtSchema.safeParseAsync(
-                request.params.arguments
-              );
-              if (!parsedArgs.success) {
-                throw new Error(
-                  `Invalid arguments for tool ${request.params.name}: ${parsedArgs.error.message}`
-                );
-              }
-              return await processThought(parsedArgs.data);
+              parsedArgs = await processThoughtSchema.parseAsync(request.params.arguments);
+              result = await processThought(parsedArgs);
+              break;
             case "init_project_rules":
-              return await initProjectRules();
+              // Assuming initProjectRules takes no args or handles undefined
+              result = await initProjectRules(); 
+              break;
             case "log_data_dir":
-              return await logDataDir();
+              // Assuming logDataDir takes no args or handles undefined
+              result = await logDataDir();
+              break;
+            // Add case for the new consult_expert tool
+            case "consult_expert":
+              await logToFile(`[Server] Calling consult_expert with args: ${JSON.stringify(request.params.arguments)}`); 
+              parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
+              await logToFile(`[Server] Awaiting result from consultExpert...`); 
+              result = await consultExpert(parsedArgs);
+              // Limit log length for potentially long results
+              const resultSnippet = typeof result === 'string' ? result.substring(0, 200) + (result.length > 200 ? '...' : '') : JSON.stringify(result);
+              await logToFile(`[Server] Received result from consultExpert: ${resultSnippet}`); 
+              break;
             default:
-              throw new Error(`Tool ${request.params.name} does not exist`);
+              throw new Error(`Tool ${toolName} does not exist`);
           }
+
+          await logToFile(`[Server] Tool ${toolName} executed successfully. Preparing response.`);
+          // Return the result with content array at the TOP level
+          return {
+            toolName: toolName,
+            // Move content array to the top level
+            content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }],
+            // Remove the nested 'result' object for success
+            // result: { content: [...] }
+          };
+
         } catch (error) {
           const errorMsg =
             error instanceof Error ? error.message : String(error);
+          await logToFile(`[Server] Error calling tool ${toolName}: ${errorMsg}`);
+          if (error instanceof Error && error.stack) {
+            await logToFile(`[Server] Error Stack: ${error.stack}`);
+          }
+          console.error(`Error calling tool ${toolName}:`, errorMsg);
+
+          // Return the error with content array at the TOP level
+          const errorText = `Error occurred: ${errorMsg} \n Please check arguments and try again.`;
           return {
-            content: [
-              {
-                type: "text",
-                text: `Error occurred: ${errorMsg} \n Please try correcting the error and calling the tool again`,
-              },
-            ],
+             toolName: toolName,
+             // Include an error field at the top level
+             error: { message: errorMsg },
+             // Also include the content array at the top level
+             content: [{ type: 'text', text: errorText }],
+             // Remove the nested 'result' object for errors
+             // result: { error: ..., content: [...] }
           };
         }
       }
@@ -484,8 +356,9 @@ async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
-    console.log("Shrimp Task Manager service started");
   } catch (error) {
+    // Log fatal startup errors to console/stderr
+    console.error("[FATAL] Server failed to start:", error);
     process.exit(1);
   }
 }
