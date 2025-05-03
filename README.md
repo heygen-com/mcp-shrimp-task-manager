@@ -1,6 +1,6 @@
 [English](README.md) | [中文](docs/zh/README.md)
 
-> **Note:** This is a fork of the original `cjo4m06/mcp-shrimp-task-manager` repository, managed by Heygen and potentially containing custom modifications.
+> **Note—HeyGen Fork:** This is a fork of the original `cjo4m06/mcp-shrimp-task-manager` repository, managed by Heygen and potentially containing custom modifications.
 
 ## 目錄
 
