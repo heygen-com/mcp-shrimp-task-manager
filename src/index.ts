@@ -219,7 +219,7 @@ async function main() {
           { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           // Add the new consult_expert tool
-          { name: "consult_expert", description: 'Consults an external AI expert (OpenAI) when the primary agent is stuck on a problem. Provide the problem description and relevant context to get a suggestion.', inputSchema: zodToJsonSchema(ConsultExpertInputSchema) }, 
+          { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
         ],
       };
     });
