@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Rule Name: Load Project Context on New Chat
+
+Description: Reads the primary project context document at the start of a new chat session.
+
+Trigger: On New Chat Session Start
+
+Condition: Only run once per session, before the first response.
+
+Action:
+  Type: Read File / Load Context
+  Path: [architecture.md](mdc:.cursor/research/architecture.md)
+  Purpose: "To provide essential background context about the project structure, goals, and key components before beginning work."
