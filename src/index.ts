@@ -53,6 +53,8 @@ import {
   queryTaskSchema,
   getTaskDetail,
   getTaskDetailSchema,
+  checkAgentStatus,
+  checkAgentStatusSchema
 } from "./tools/taskTools.js";
 
 // Import the new tool function and schema
@@ -223,6 +225,8 @@ async function main() {
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           // Add the new consult_expert tool
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
+          // Add the check_agent_status tool
+          { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
         ],
       };
     });
@@ -321,18 +325,25 @@ async function main() {
               const resultSnippet = typeof result === 'string' ? result.substring(0, 200) + (result.length > 200 ? '...' : '') : JSON.stringify(result);
               await logToFile(`[Server] Received result from consultExpert: ${resultSnippet}`); 
               break;
+            // Add case for check_agent_status
+            case "check_agent_status":
+              await logToFile(`[Server] Calling check_agent_status...`);
+              // No args expected currently, parse arguments safely
+              parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
+              result = await checkAgentStatus(); // Call the function
+              await logToFile(`[Server] check_agent_status completed.`);
+              break;  
             default:
               throw new Error(`Tool ${toolName} does not exist`);
           }
 
           await logToFile(`[Server] Tool ${toolName} executed successfully. Preparing response.`);
           // Return the result with content array at the TOP level
+          // Ensure 'result' has the correct structure expected by the handler
+          // The tool functions (like checkAgentStatus) should return { content: [...] }
           return {
             toolName: toolName,
-            // Move content array to the top level
-            content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }],
-            // Remove the nested 'result' object for success
-            // result: { content: [...] }
+            ...(result as object) // Spread the result object which contains { content: [...] }
           };
 
         } catch (error) {
@@ -352,8 +363,6 @@ async function main() {
              error: { message: errorMsg },
              // Also include the content array at the top level
              content: [{ type: 'text', text: errorText }],
-             // Remove the nested 'result' object for errors
-             // result: { error: ..., content: [...] }
           };
         }
       }

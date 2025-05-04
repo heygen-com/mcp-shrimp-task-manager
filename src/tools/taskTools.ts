@@ -1260,3 +1260,103 @@ export async function getTaskDetail({
     };
   }
 }
+
+// 新增：檢查 Agent 狀態工具
+export const checkAgentStatusSchema = z.object({}).describe("檢查當前進行中任務的狀態，以診斷可能的停滯情況。不需要參數。");
+
+export async function checkAgentStatus(): Promise<{ content: { type: "text"; text: string }[] }> {
+    await logToFile('[checkAgentStatus] Tool called.');
+    try {
+        const allTasks = await getAllTasks();
+        const inProgressTasks = allTasks.filter(task => task.status === TaskStatus.IN_PROGRESS);
+
+        let statusSummaryLines: string[] = [];
+
+        if (inProgressTasks.length === 0) {
+            await logToFile('[checkAgentStatus] No tasks currently IN_PROGRESS.');
+            statusSummaryLines.push("目前沒有任何任務處於 IN_PROGRESS 狀態。");
+            statusSummaryLines.push("建議使用 `list_tasks` 查看待處理任務，或使用 `plan_task` 開始新計劃。");
+        } else {
+            await logToFile(`[checkAgentStatus] Found ${inProgressTasks.length} IN_PROGRESS tasks.`);
+            statusSummaryLines.push("以下是目前 IN_PROGRESS 任務的狀態：");
+            statusSummaryLines.push(""); // Add a blank line
+
+            for (const task of inProgressTasks) {
+                const now = new Date();
+                const updatedAt = task.updatedAt;
+                const timeSinceUpdate = now.getTime() - updatedAt.getTime();
+                const minutesSinceUpdate = Math.round(timeSinceUpdate / (1000 * 60));
+
+                statusSummaryLines.push(`--- Task: ${task.name} (ID: ${task.id}) ---`);
+                statusSummaryLines.push(`- 最後更新時間: ${updatedAt.toISOString()} (${minutesSinceUpdate} 分鐘前)`);
+
+                let lastAction = "無記錄的操作";
+                let lastActionTime = updatedAt;
+
+                if (task.attemptHistory && task.attemptHistory.length > 0) {
+                    const lastAttempt = task.attemptHistory[task.attemptHistory.length - 1];
+                    lastActionTime = lastAttempt.timestamp;
+                    if (lastAttempt.status === "started") {
+                         lastAction = `執行開始於 ${lastAttempt.timestamp.toISOString()}`;
+                    } else {
+                        lastAction = `上次嘗試 ${lastAttempt.status} 於 ${lastAttempt.timestamp.toISOString()}` + (lastAttempt.error ? ` (錯誤: ${lastAttempt.error.substring(0, 100)}...)` : '');
+                    }
+                }
+
+                 if (task.expertSuggestions && task.expertSuggestions.length > 0) {
+                    const lastSuggestion = task.expertSuggestions[task.expertSuggestions.length - 1];
+                    if(lastSuggestion.timestamp > lastActionTime) {
+                        lastActionTime = lastSuggestion.timestamp;
+                        lastAction = `收到專家建議於 ${lastSuggestion.timestamp.toISOString()}`;
+                    }
+                }
+
+                const timeSinceLastAction = now.getTime() - lastActionTime.getTime();
+                const minutesSinceLastAction = Math.round(timeSinceLastAction / (1000 * 60));
+
+                statusSummaryLines.push(`- 最後記錄的操作: ${lastAction} (${minutesSinceLastAction} 分鐘前)`);
+
+                if (minutesSinceLastAction > 5) {
+                    statusSummaryLines.push(`- **注意:** 自上次記錄的操作以來已過去 ${minutesSinceLastAction} 分鐘。`);
+                    statusSummaryLines.push(`  - 如果任務卡住或失敗，請使用 report_task_result(taskId='${task.id}', status='failed', error='...') 報告錯誤。`);
+                    statusSummaryLines.push(`  - 如果任務已成功完成，請使用 report_task_result(taskId='${task.id}', status='succeeded') 報告成功。`);
+                    statusSummaryLines.push(`  - 如果需要幫助，請使用 consult_expert(taskId='${task.id}', ...)。`);
+                } else {
+                    statusSummaryLines.push(`- 狀態似乎正常，上次活動在 ${minutesSinceLastAction} 分鐘前。`);
+                }
+                statusSummaryLines.push(""); // Add blank line after each task
+            }
+            statusSummaryLines.push("---請根據以上狀態判斷後續操作。");
+        }
+
+        const statusSummary = statusSummaryLines.join('\n'); // Join lines with newline
+
+        // Construct final prompt using template literal for clarity
+        const prompt = `## Agent 狀態檢查
+
+${statusSummary}`;
+        await logToFile(`[checkAgentStatus] Generated status summary.`);
+
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: prompt,
+                },
+            ],
+        };
+
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        await logToFile(`[checkAgentStatus] Error: ${errorMsg}`);
+        // Ensure return type matches Promise<{ content: ... }>
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: `檢查 Agent 狀態時發生錯誤: ${errorMsg}`,
+                },
+            ],
+        };
+    }
+}
