@@ -45,7 +45,7 @@ async function callOpenAI(prompt: string): Promise<string> {
 }
 
 // Define and export the main tool execution function
-export async function consultExpert(params: z.infer<typeof ConsultExpertInputSchema>): Promise<string> {
+export async function consultExpert(params: z.infer<typeof ConsultExpertInputSchema>): Promise<{ content: { type: "text"; text: string }[] }> {
   await logToFile(`[consultExpert] Function started with params: ${JSON.stringify(params)}`);
 
   const { taskId, problem_description, relevant_context, task_goal } = params;
@@ -125,8 +125,16 @@ export async function consultExpert(params: z.infer<typeof ConsultExpertInputSch
 
   await logToFile(`[consultExpert] Formatting response.`);
   // Return the suggestion
-  // Prefix changed slightly to be more general
+  // Prefix changed slightly to be more general - corrected backslash
   const finalResponse = `Expert Response:\n${expertAdvice}`;
   await logToFile(`[consultExpert] Returning final response (length: ${finalResponse.length})`);
-  return finalResponse;
+  // Wrap the string in the expected content array structure
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: finalResponse,
+      },
+    ],
+  };
 } 

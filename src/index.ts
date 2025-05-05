@@ -322,7 +322,10 @@ async function main() {
               await logToFile(`[Server] Awaiting result from consultExpert...`); 
               result = await consultExpert(parsedArgs);
               // Limit log length for potentially long results
-              const resultSnippet = typeof result === 'string' ? result.substring(0, 200) + (result.length > 200 ? '...' : '') : JSON.stringify(result);
+              // Use type assertion to fix TS error
+              const resultSnippet = typeof result === 'string' 
+                ? (result as string).substring(0, 200) + ((result as string).length > 200 ? '...' : '') 
+                : JSON.stringify(result);
               await logToFile(`[Server] Received result from consultExpert: ${resultSnippet}`); 
               break;
             // Add case for check_agent_status
