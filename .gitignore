@@ -50,9 +50,13 @@ coverage/
 
 # 資料檔案
 *.sqlite
-data/*.json
-data/*/*.json
-data/*
+# data/*.json # Removed incorrect rule
+# data/*/*.json # Removed incorrect rule
+# data/* # Removed incorrect rule
 
 # Cursor AI 生成的暫存檔案
-.cursor/tmp/ 
+.cursor/tmp/
+
+# Shrimp Task Manager Data
+# data/tasks.json # Removed incorrect rule
+shrimp-data/ 
