@@ -3,15 +3,5 @@ description:
 globs: 
 alwaysApply: true
 ---
-Rule Name: Load Project Context on New Chat
-
-Description: Reads the primary project context document at the start of a new chat session.
-
-Trigger: On New Chat Session Start
-
-Condition: Only run once per session, before the first response.
-
-Action:
-  Type: Read File / Load Context
-  Path: [architecture.md](mdc:.cursor/research/architecture.md)
-  Purpose: "To provide essential background context about the project structure, goals, and key components before beginning work."
+- Once per session before you respond to the first request make sure to read [architecture.md](mdc:.cursor/research/architecture.md)
+- When faced with technical implementation questions, design choices, complex errors, or uncertainty about the best technical approach, you MUST prioritize using the `consult_expert` tool before asking the user for guidance. Reserve direct questions to the user primarily for clarifying high-level goals, requirements, or seeking necessary approvals, not for solving technical implementation details.

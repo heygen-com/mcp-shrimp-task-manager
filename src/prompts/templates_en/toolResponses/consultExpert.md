@@ -1,6 +1,6 @@
-## 檢測到循環失敗
+## Repeated Failure Detected
 
-任務 '{{taskName}}' (ID: {{taskId}}) 連續失敗 {{failureCount}} 次。最近的錯誤是：
+Task '{{taskName}}' (ID: {{taskId}}) has failed {{failureCount}} consecutive times. Recent errors:
 {{{formattedFailureHistory}}}
 
-建議呼叫 `consult_expert` 工具，提供任務ID和以上錯誤歷史以尋求協助。 
+**You MUST call the `consult_expert` tool**, providing the task ID and the error history above to seek assistance. Do not retry this task or attempt other actions; seek expert advice immediately. 

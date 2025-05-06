@@ -1,5 +1,14 @@
 Consults an external AI expert (OpenAI) when the primary agent is stuck on a problem. Provide the problem description and relevant context to get a suggestion.
 
+**When to Use:**
+
+*   **Technical Roadblocks:** If you encounter complex technical challenges, implementation difficulties, errors you cannot resolve, or are unsure about the best technical approach.
+*   **Algorithm/Design Questions:** When you need guidance on choosing the right approach, algorithm, or design pattern.
+*   **Implementation Details:** If you need specific code examples (beyond simple syntax), configuration details, or library usage patterns.
+*   **Clarification Needed:** If requirements or implementation details seem ambiguous *after* reviewing existing documentation and task details.
+*   **Repeated Failures:** This tool **MUST** be used if a task fails repeatedly (as indicated by the `report_task_result` tool).
+*   **Prefer Expert over User for Technical Issues:** **Strongly prefer using this tool for any technical implementation questions, design choices, or troubleshooting *before* asking the user.** Only ask the user for high-level goal clarification, requirement decisions, or final approval – not for how to implement technical details.
+
 **Important Usage Notes:**
 
 *   **Stateless Nature:** This tool is stateless. Each call is treated as an independent interaction and does not retain memory of previous calls. The calling agent (AI) is responsible for providing all necessary historical context for follow-up questions.

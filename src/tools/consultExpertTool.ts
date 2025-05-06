@@ -7,7 +7,7 @@ import { ExpertSuggestion } from '../types/index.js'; // <-- Import ExpertSugges
 
 // Define the input schema for the tool using Zod
 export const ConsultExpertInputSchema = z.object({
-  taskId: z.string().uuid({ message: "請提供有效的任務ID (UUID格式)" }).describe("需要協助的任務ID"),
+  taskId: z.string().uuid({ message: "請提供有效的任務ID (UUID格式)" }).optional().describe("需要協助的任務ID (如果問題與特定任務相關)"),
   problem_description: z.string().describe('A clear description of the problem or question the agent is stuck on.'),
   relevant_context: z.string().describe('Relevant context like code snippets, error messages, previous steps, or task details.'),
   task_goal: z.string().optional().describe('The overall goal the agent is trying to achieve.'),
@@ -98,28 +98,31 @@ export async function consultExpert(params: z.infer<typeof ConsultExpertInputSch
   // Call the expert AI
   const expertAdvice = await callOpenAI(prompt);
 
-  await logToFile(`[consultExpert] Received advice from callOpenAI. Attempting to persist advice to task ${taskId}.`);
-  
-  // *** Persist advice to task ***
-  try {
-    const task = await getTaskById(taskId);
-    if (task) {
-      const newSuggestion: ExpertSuggestion = { 
-        timestamp: new Date(), 
-        advice: expertAdvice // Store the raw advice 
-      };
-      const existingSuggestions = task.expertSuggestions || [];
-      const updatedSuggestions = [...existingSuggestions, newSuggestion];
-      await updateTask(taskId, { expertSuggestions: updatedSuggestions });
-      await logToFile(`[consultExpert] Successfully persisted advice to task ${taskId}.`);
-    } else {
-      await logToFile(`[consultExpert] Warning: Task ${taskId} not found. Could not persist advice.`);
-    }
-  } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      await logToFile(`[consultExpert] Error persisting advice to task ${taskId}: ${message}`);
-      // Decide if this error should be surfaced to the agent or just logged.
-      // For now, log and continue, returning the advice anyway.
+  // *** Persist advice to task only if taskId is provided ***
+  if (taskId) {
+      await logToFile(`[consultExpert] Received advice from callOpenAI. Attempting to persist advice to task ${taskId}.`);
+      try {
+        const task = await getTaskById(taskId);
+        if (task) {
+          const newSuggestion: ExpertSuggestion = {
+            timestamp: new Date(),
+            advice: expertAdvice // Store the raw advice
+          };
+          const existingSuggestions = task.expertSuggestions || [];
+          const updatedSuggestions = [...existingSuggestions, newSuggestion];
+          await updateTask(taskId, { expertSuggestions: updatedSuggestions });
+          await logToFile(`[consultExpert] Successfully persisted advice to task ${taskId}.`);
+        } else {
+          await logToFile(`[consultExpert] Warning: Task ${taskId} not found. Could not persist advice.`);
+        }
+      } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          await logToFile(`[consultExpert] Error persisting advice to task ${taskId}: ${message}`);
+          // Decide if this error should be surfaced to the agent or just logged.
+          // For now, log and continue, returning the advice anyway.
+      }
+  } else {
+      await logToFile(`[consultExpert] Received advice from callOpenAI. No taskId provided, skipping persistence.`);
   }
   // *** End Persist advice ***
 
