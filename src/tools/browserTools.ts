@@ -39,12 +39,22 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
     try {
       const tabsResponse = await axios.get<TabInfo[]>(`${SERVER_BASE_URL}/tabs`);
       tabs = tabsResponse.data;
-      if (!Array.isArray(tabs) || tabs.length === 0) {
+      if (!Array.isArray(tabs)) {
         return {
           content: [
             {
               type: "text" as const,
-              text: "Failed to get tabs or no active tabs found from the DevTools Bridge server.",
+              text: `Received unexpected data format from the DevTools Bridge server (${SERVER_BASE_URL}/tabs). Expected an array of tab information. Please check the server logs.`,
+            },
+          ],
+        };
+      }
+      if (tabs.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `No active browser tabs are currently being monitored by the MCP DevTools Bridge server (at ${SERVER_BASE_URL}). To enable monitoring:\n1. Ensure the 'mcp-devtools-bridge' Chrome extension is installed and enabled.\n2. Open your target webpage and activate Chrome DevTools for that page.\n3. Within DevTools, locate the 'MCP Context' panel (or similar, as described in architecture.md) and ensure monitoring/recording has been started or activated for the tab.\n4. Verify the mcp-local-server (the bridge server itself) is running correctly.`,
             },
           ],
         };
@@ -105,7 +115,7 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
           content: [
             {
               type: "text" as const,
-              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}). Server-side logs for this tab ID were requested to be cleared.`,
+              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}). This might mean no new browser activity was captured since the last check, or that monitoring for this tab isn't capturing the specific events you're interested in. Server-side logs for this tab ID were requested to be cleared.`,
             },
           ],
         };
