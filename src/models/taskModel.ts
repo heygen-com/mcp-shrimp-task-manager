@@ -49,12 +49,33 @@ async function readTasks(): Promise<Task[]> {
   const tasks = JSON.parse(data).tasks;
 
   // 將日期字串轉換回 Date 物件
-  return tasks.map((task: any) => ({
-    ...task,
-    createdAt: task.createdAt ? new Date(task.createdAt) : new Date(),
-    updatedAt: task.updatedAt ? new Date(task.updatedAt) : new Date(),
-    completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-  }));
+  return tasks.map((task: any) => {
+    // Parse top-level dates
+    const parsedTask = {
+      ...task,
+      createdAt: task.createdAt ? new Date(task.createdAt) : new Date(),
+      updatedAt: task.updatedAt ? new Date(task.updatedAt) : new Date(),
+      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+    };
+
+    // Parse dates within expertSuggestions array
+    if (parsedTask.expertSuggestions && Array.isArray(parsedTask.expertSuggestions)) {
+      parsedTask.expertSuggestions = parsedTask.expertSuggestions.map((suggestion: any) => ({
+        ...suggestion,
+        timestamp: suggestion.timestamp ? new Date(suggestion.timestamp) : new Date(), // Parse timestamp
+      }));
+    }
+
+    // Parse dates within attemptHistory array
+    if (parsedTask.attemptHistory && Array.isArray(parsedTask.attemptHistory)) {
+      parsedTask.attemptHistory = parsedTask.attemptHistory.map((attempt: any) => ({
+        ...attempt,
+        timestamp: attempt.timestamp ? new Date(attempt.timestamp) : new Date(), // Parse timestamp
+      }));
+    }
+
+    return parsedTask;
+  });
 }
 
 // 寫入所有任務
