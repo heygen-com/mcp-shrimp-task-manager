@@ -15,14 +15,7 @@ import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
-
-// Import existing tool arrays
-// import { taskTools } from "./tools/taskTools.js";
-// import { thoughtChainTools } from "./tools/thoughtChainTools.js";
-// import { projectTools } from "./tools/projectTools.js";
-// import { debugTools } from "./tools/debugTools.js";
-
-// Import individual tool functions and schemas (existing)
+import { checkBrowserLogs, checkBrowserLogsSchema } from './tools/browserTools.js';
 import {
   planTask,
   planTaskSchema,
@@ -55,17 +48,8 @@ import {
   checkAgentStatus,
   checkAgentStatusSchema
 } from "./tools/taskTools.js";
-
-// Import the new tool function and schema
-// import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
-
-// Import the new tool function and schema
 import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
-
-// Import the new tool function and schema
 import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
-
-// Import the new tool function and schema
 import { logDataDir, logDataDirSchema } from "./tools/debugTools.js";
 
 async function main() {
@@ -222,10 +206,9 @@ async function main() {
           { name: "process_thought", description: loadPromptFromTemplate("toolsDescription/processThought.md"), inputSchema: zodToJsonSchema(processThoughtSchema) },
           { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
-          // Add the new consult_expert tool
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
-          // Add the check_agent_status tool
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
+          { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
         ],
       };
     });
@@ -313,7 +296,6 @@ async function main() {
               // Assuming logDataDir takes no args or handles undefined
               result = await logDataDir();
               break;
-            // Add case for the new consult_expert tool
             case "consult_expert":
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
               result = await consultExpert(parsedArgs);
@@ -323,22 +305,24 @@ async function main() {
                 ? (result as string).substring(0, 200) + ((result as string).length > 200 ? '...' : '') 
                 : JSON.stringify(result);
               break;
-            // Add case for check_agent_status
             case "check_agent_status":
-              // No args expected currently, parse arguments safely
               parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
-              result = await checkAgentStatus(); // Call the function
+              result = await checkAgentStatus();
               break;  
+            case "check_browser_logs":
+              parsedArgs = await checkBrowserLogsSchema.parseAsync(request.params.arguments || {}); // Accepts empty object
+              result = await checkBrowserLogs.execute(parsedArgs); // Call the execute method
+              break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);
           }
 
-          // Return the result with content array at the TOP level
-          // Ensure 'result' has the correct structure expected by the handler
-          // The tool functions (like checkAgentStatus) should return { content: [...] }
+          // Return the result
+          // Ensure the tool's execute function returns the data in the expected format 
+          // (likely just the stringified JSON logs in this case)
           return {
             toolName: toolName,
-            ...(result as object) // Spread the result object which contains { content: [...] }
+            content: [{ type: 'text', text: result }], // Wrap result in standard content structure
           };
 
         } catch (error) {
