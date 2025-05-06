@@ -48,6 +48,7 @@ import {
   getUpdateTaskContentPrompt,
 } from "../prompts/index.js";
 import { logToFile } from "../utils/logUtils.js";
+import { loadPromptFromTemplate, generatePrompt } from "../prompts/loader.js";
 
 // 開始規劃工具
 export const planTaskSchema = z.object({
@@ -594,11 +595,11 @@ export async function executeTask({
   const loadedFilesResult = await loadTaskRelatedFiles(task.relatedFiles || []);
   const relatedFilesSummary = typeof loadedFilesResult === 'string' ? loadedFilesResult : loadedFilesResult.summary;
 
-  // 使用prompt生成器獲取最終prompt
-  const prompt = getExecuteTaskPrompt({
-    task: startedTask, // Use the task returned by startTaskAttempt
-    complexityAssessment: complexity || undefined, // Convert null to undefined
-    relatedFilesSummary, // Pass the summary string
+  // Generate prompt (async)
+  const prompt = await getExecuteTaskPrompt({
+    task: startedTask,
+    complexityAssessment: complexity || undefined,
+    relatedFilesSummary,
   });
 
   // 返回生成的prompt給AI Agent
@@ -712,8 +713,18 @@ export async function reportTaskResult({
 
     if (loopDetection.isLooping) {
       await logToFile(`[reportTaskResult] Loop detected for task ${taskId}. Prompting for consult_expert. Failure History: ${JSON.stringify(loopDetection.failureHistory)}`);
-      // TODO: Replace with real prompt generator call
-      const consultPrompt = `## 檢測到循環失敗\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 連續失敗 ${loopDetection.failureHistory.length} 次。最近的錯誤是：\n${loopDetection.failureHistory.map((e, i) => `${i + 1}. ${e}`).join("\n")}\n\n建議呼叫 'consult_expert' 工具，提供任務ID和以上錯誤歷史以尋求協助。`;
+      // Load the mandatory consult prompt template
+      const consultPromptTemplate = loadPromptFromTemplate("toolResponses/consultExpert.md");
+      // Format the failure history for the prompt
+      const formattedFailureHistory = loopDetection.failureHistory.map((e, i) => `${i + 1}. ${e}`).join("\n");
+      // Generate the final prompt
+      const consultPrompt = generatePrompt(consultPromptTemplate, {
+        taskName: updatedTask.name,
+        taskId: taskId,
+        failureCount: loopDetection.failureHistory.length,
+        formattedFailureHistory: formattedFailureHistory
+      });
+
       return {
         content: [
           {
@@ -740,8 +751,13 @@ export async function reportTaskResult({
   // 處理成功情況
   if (status === "succeeded") {
     await logToFile(`[reportTaskResult] Success reported for task ${taskId}. Prompting for complete_task.`);
-    // TODO: Replace with real prompt generator call
-    const completePrompt = `## 任務執行成功\n\n任務 '${updatedTask.name}' (ID: ${taskId}) 已成功執行並通過驗證。\n\n請呼叫 'complete_task' 工具，提供任務ID以標記任務完成並生成摘要。`;
+    // Load the success prompt template (Assuming one exists or using a simple string)
+    // TODO: Create and use a dedicated template for this success message if needed
+    const completePromptTemplate = loadPromptFromTemplate("toolResponses/reportSuccess.md"); // Assuming this template exists
+    const completePrompt = generatePrompt(completePromptTemplate, {
+        taskName: updatedTask.name,
+        taskId: taskId
+    });
     return {
       content: [
         {

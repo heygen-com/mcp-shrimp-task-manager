@@ -270,6 +270,9 @@ async function main() {
             case "execute_task":
               parsedArgs = await executeTaskSchema.parseAsync(request.params.arguments);
               result = await executeTask(parsedArgs);
+              // Log the type and value of the text field specifically
+              const textValue = result?.content?.[0]?.text;
+              await logToFile(`[Server] Returning result for execute_task. Text field type: ${typeof textValue}, Value: ${JSON.stringify(textValue)}`);
               break;
             case "verify_task":
               parsedArgs = await verifyTaskSchema.parseAsync(request.params.arguments);
