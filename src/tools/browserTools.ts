@@ -87,7 +87,17 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
           };
       }
 
-      // Get the latest logs
+      // After successfully "reading" logs (even if empty), attempt to delete them from the server.
+      try {
+        await axios.delete(`${SERVER_BASE_URL}/logs`, { params: { tabId: targetTabId } });
+        console.log(`Successfully requested deletion of logs from server for tab ID: ${targetTabId}`);
+      } catch (deleteError: any) {
+        console.error(`Attempt to delete logs from server for tab ID ${targetTabId} failed: ${deleteError.message || deleteError}`);
+        // Log the error, but proceed to return the fetched logs.
+        // The primary function is to return logs; deletion is a secondary cleanup.
+      }
+
+      // Get the latest logs from the fetched data to return to the user
       const latestLogs = logs.slice(-DEFAULT_MAX_LOGS);
 
       if (latestLogs.length === 0) {
@@ -95,7 +105,7 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
           content: [
             {
               type: "text" as const,
-              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}).`,
+              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}). Server-side logs for this tab ID were requested to be cleared.`,
             },
           ],
         };
