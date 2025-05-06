@@ -289,21 +289,17 @@ async function main() {
               result = await processThought(parsedArgs);
               break;
             case "init_project_rules":
-              // Assuming initProjectRules takes no args or handles undefined
-              result = await initProjectRules(); 
+              parsedArgs = await initProjectRulesSchema.parseAsync(request.params.arguments || {});
+              result = await initProjectRules();
               break;
             case "log_data_dir":
-              // Assuming logDataDir takes no args or handles undefined
+              parsedArgs = await logDataDirSchema.parseAsync(request.params.arguments || {});
               result = await logDataDir();
               break;
             case "consult_expert":
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
               result = await consultExpert(parsedArgs);
-              // Limit log length for potentially long results
-              // Use type assertion to fix TS error
-              const resultSnippet = typeof result === 'string' 
-                ? (result as string).substring(0, 200) + ((result as string).length > 200 ? '...' : '') 
-                : JSON.stringify(result);
+              // Logging of result snippet removed for clarity, as 'result' is now an object
               break;
             case "check_agent_status":
               parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
@@ -317,12 +313,10 @@ async function main() {
               throw new Error(`Tool ${toolName} does not exist`);
           }
 
-          // Return the result
-          // Ensure the tool's execute function returns the data in the expected format 
-          // (likely just the stringified JSON logs in this case)
+          // Return the result directly from the tool, assuming it's correctly structured
           return {
             toolName: toolName,
-            content: [{ type: 'text', text: result }], // Wrap result in standard content structure
+            ...result // Spread the properties of result (e.g., content, ephemeral)
           };
 
         } catch (error) {

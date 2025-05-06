@@ -38,56 +38,57 @@ async function callOpenAI(prompt: string): Promise<string> {
 
 // Define and export the main tool execution function
 export async function consultExpert(params: z.infer<typeof ConsultExpertInputSchema>): Promise<{ content: { type: "text"; text: string }[] }> {
-  const { taskId, problem_description, relevant_context, task_goal } = params;
+  try {
+    const { taskId, problem_description, relevant_context, task_goal } = params;
 
-  // --- Load prompt components dynamically --- 
-  let framingTemplate = "tools/consultExpert/framing_default.md";
-  let instructionTemplate = "tools/consultExpert/instruction_default.md";
-  const problemLower = problem_description.toLowerCase();
+    // --- Load prompt components dynamically --- 
+    let framingTemplate = "tools/consultExpert/framing_default.md";
+    let instructionTemplate = "tools/consultExpert/instruction_default.md";
+    const problemLower = problem_description.toLowerCase();
 
-  // Determine template based on intent
-  if (
-    problemLower.startsWith('what') || 
-    problemLower.startsWith('when') || 
-    problemLower.startsWith('who') || 
-    problemLower.startsWith('is ') || 
-    problemLower.startsWith('are ') ||
-    problemLower.startsWith('can you') || // Catching variations
-    problemLower.includes(' date') || // Heuristic for date questions
-    problemLower.includes(' time')
-  ) {
-    framingTemplate = "tools/consultExpert/framing_question.md";
-    instructionTemplate = "tools/consultExpert/instruction_question.md";
-  } 
-  else if (
-    problemLower.includes('how to') || 
-    problemLower.includes('implement') || 
-    problemLower.includes('create') || 
-    problemLower.includes('write code')
-  ) {
-    framingTemplate = "tools/consultExpert/framing_howto.md";
-    instructionTemplate = "tools/consultExpert/instruction_howto.md";
-  }
+    // Determine template based on intent
+    if (
+      problemLower.startsWith('what') || 
+      problemLower.startsWith('when') || 
+      problemLower.startsWith('who') || 
+      problemLower.startsWith('is ') || 
+      problemLower.startsWith('are ') ||
+      problemLower.startsWith('can you') || // Catching variations
+      problemLower.includes(' date') || // Heuristic for date questions
+      problemLower.includes(' time')
+    ) {
+      framingTemplate = "tools/consultExpert/framing_question.md";
+      instructionTemplate = "tools/consultExpert/instruction_question.md";
+    } 
+    else if (
+      problemLower.includes('how to') || 
+      problemLower.includes('implement') || 
+      problemLower.includes('create') || 
+      problemLower.includes('write code')
+    ) {
+      framingTemplate = "tools/consultExpert/framing_howto.md";
+      instructionTemplate = "tools/consultExpert/instruction_howto.md";
+    }
 
-  // Load the actual prompt text from templates
-  const framing = loadPromptFromTemplate(framingTemplate);
-  const instruction = loadPromptFromTemplate(instructionTemplate);
-  // --- End Dynamic Prompt Construction ---
+    // Load the actual prompt text from templates
+    const framing = loadPromptFromTemplate(framingTemplate);
+    const instruction = loadPromptFromTemplate(instructionTemplate);
+    // --- End Dynamic Prompt Construction ---
 
-  // Construct the prompt using loaded components
-  let prompt = `${framing}\n\nRequest/Problem: ${problem_description}\n\nRelevant Context:\n${relevant_context}`;
+    // Construct the prompt using loaded components
+    let prompt = `${framing}\n\nRequest/Problem: ${problem_description}\n\nRelevant Context:\n${relevant_context}`;
 
-  if (task_goal) {
-    prompt += `\n\nOverall Task Goal: ${task_goal}`;
-  }
+    if (task_goal) {
+      prompt += `\n\nOverall Task Goal: ${task_goal}`;
+    }
 
-  prompt += `\n\n${instruction}`;
-  
-  // Call the expert AI
-  const expertAdvice = await callOpenAI(prompt);
+    prompt += `\n\n${instruction}`;
+    
+    // Call the expert AI
+    const expertAdvice = await callOpenAI(prompt);
 
-  // *** Persist advice to task only if taskId is provided ***
-  if (taskId) {
+    // *** Persist advice to task only if taskId is provided ***
+    if (taskId) {
       try {
         const task = await getTaskById(taskId);
         if (task) {
@@ -99,26 +100,39 @@ export async function consultExpert(params: z.infer<typeof ConsultExpertInputSch
           const updatedSuggestions = [...existingSuggestions, newSuggestion];
           await updateTask(taskId, { expertSuggestions: updatedSuggestions });
         } else {
-          console.error(`Warning: Task ${taskId} not found. Could not persist advice.`);
+          console.warn(`Warning: Task ${taskId} not found. Could not persist advice.`);
         }
       } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`Error persisting expert advice for task ${taskId}:`, message);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Error persisting expert advice for task ${taskId}:`, message);
       }
-  } else {
+    } else {
       console.log(`Received advice from callOpenAI. No taskId provided, skipping persistence.`);
-  }
-  // *** End Persist advice ***
+    }
+    // *** End Persist advice ***
 
-  // Return the suggestion
-  // Prefix changed slightly to be more general - corrected backslash
-  const finalResponse = `## Expert Consultation Result\n\n${expertAdvice}`;
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: finalResponse,
-      },
-    ],
-  };
+    // Return the suggestion
+    // Prefix changed slightly to be more general - corrected backslash
+    const finalResponse = `## Expert Consultation Result\n\n${expertAdvice}`;
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: finalResponse,
+        },
+      ],
+    };
+  } catch (error: unknown) {
+    console.error('Error in consultExpert tool:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred while consulting the expert.';
+    // Ensure the return type is still satisfied even in case of error
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Error during expert consultation: ${errorMessage}`,
+        },
+      ],
+    };
+  }
 } 

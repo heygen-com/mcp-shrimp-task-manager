@@ -40,14 +40,28 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
       const tabsResponse = await axios.get<TabInfo[]>(`${SERVER_BASE_URL}/tabs`);
       tabs = tabsResponse.data;
       if (!Array.isArray(tabs) || tabs.length === 0) {
-        return 'Failed to get tabs or no active tabs found from the DevTools Bridge server.';
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Failed to get tabs or no active tabs found from the DevTools Bridge server.",
+            },
+          ],
+        };
       }
     } catch (error: any) {
       console.error('Error fetching tabs:', error);
       const message = axios.isAxiosError(error) && error.response?.status === 404
-        ? 'DevTools Bridge server not found at ${SERVER_BASE_URL}/tabs.'
+        ? `DevTools Bridge server not found at ${SERVER_BASE_URL}/tabs.`
         : `Error fetching tabs: ${error.message}`;
-      return message;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: message,
+          },
+        ],
+      };
     }
 
     // Find the tab with the latest activity
@@ -63,25 +77,53 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
       let logs = logsResponse.data;
 
       if (!Array.isArray(logs)) {
-          return `Invalid log data received from server for tab ${targetTabId}. Expected an array.`;
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Invalid log data received from server for tab ${targetTabId}. Expected an array.`,
+              },
+            ],
+          };
       }
 
       // Get the latest logs
       const latestLogs = logs.slice(-DEFAULT_MAX_LOGS);
 
       if (latestLogs.length === 0) {
-        return `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}).`;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}).`,
+            },
+          ],
+        };
       }
 
-      // Return the logs as a JSON string
-      return JSON.stringify(latestLogs, null, 2);
+      // Return the logs as a JSON string, wrapped in the content structure
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(latestLogs, null, 2),
+          },
+        ],
+      };
 
     } catch (error: any) {
       console.error(`Error fetching logs for tab ${targetTabId}:`, error);
        const message = axios.isAxiosError(error) && error.response?.status === 404
         ? `Log endpoint not found for tab ${targetTabId}. Is the server running and the tab ID correct?`
         : `Error fetching logs for tab ${targetTabId}: ${error.message}`;
-       return message;
+       return {
+        content: [
+          {
+            type: "text" as const,
+            text: message,
+          },
+        ],
+      };
     }
   },
 }; 

@@ -3,5 +3,5 @@ description:
 globs: 
 alwaysApply: true
 ---
-- Once per session before you respond to the first request make sure to read [architecture.md](mdc:.cursor/research/architecture.md)
+- Once per session before you respond to the first request make sure to read [architecture.md](mdc:.cursor/research/architecture.md) and [learnings.md](mdc:.cursor/learnings.md)
 - When faced with technical implementation questions, design choices, complex errors, or uncertainty about the best technical approach, you MUST prioritize using the `consult_expert` tool before asking the user for guidance. Reserve direct questions to the user primarily for clarifying high-level goals, requirements, or seeking necessary approvals, not for solving technical implementation details.

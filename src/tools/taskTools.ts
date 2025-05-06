@@ -73,50 +73,67 @@ export async function planTask({
   requirements,
   existingTasksReference = false,
 }: z.infer<typeof planTaskSchema>) {
-  // 獲取基礎目錄路徑
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const PROJECT_ROOT = path.resolve(__dirname, "../..");
-  const DATA_DIR = process.env.DATA_DIR || path.join(PROJECT_ROOT, "data");
-  const MEMORY_DIR = path.join(DATA_DIR, "memory");
+  try {
+    // 獲取基礎目錄路徑
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const PROJECT_ROOT = path.resolve(__dirname, "../..");
+    const DATA_DIR = process.env.DATA_DIR || path.join(PROJECT_ROOT, "data");
+    const MEMORY_DIR = path.join(DATA_DIR, "memory");
 
-  // 準備所需參數
-  let completedTasks: Task[] = [];
-  let pendingTasks: Task[] = [];
+    // 準備所需參數
+    let completedTasks: Task[] = [];
+    let pendingTasks: Task[] = [];
 
-  // 當 existingTasksReference 為 true 時，從數據庫中載入所有任務作為參考
-  if (existingTasksReference) {
-    try {
-      const allTasks = await getAllTasks();
+    // 當 existingTasksReference 為 true 時，從數據庫中載入所有任務作為參考
+    if (existingTasksReference) {
+      try {
+        const allTasks = await getAllTasks();
 
-      // 將任務分為已完成和未完成兩類
-      completedTasks = allTasks.filter(
-        (task) => task.status === TaskStatus.COMPLETED
-      );
-      pendingTasks = allTasks.filter(
-        (task) => task.status !== TaskStatus.COMPLETED
-      );
-    } catch (error) {}
+        // 將任務分為已完成和未完成兩類
+        completedTasks = allTasks.filter(
+          (task) => task.status === TaskStatus.COMPLETED
+        );
+        pendingTasks = allTasks.filter(
+          (task) => task.status !== TaskStatus.COMPLETED
+        );
+      } catch (error) {
+        console.error('Error fetching tasks for planTask:', error); // Log the error
+        // Optionally, re-throw or handle as a critical failure for planning if tasks are essential
+        // For now, we allow planning to proceed with empty tasks if fetching fails, but it's logged.
+      }
+    }
+
+    // 使用prompt生成器獲取最終prompt
+    const prompt = getPlanTaskPrompt({
+      description,
+      requirements,
+      existingTasksReference,
+      completedTasks,
+      pendingTasks,
+      memoryDir: MEMORY_DIR,
+    });
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: prompt,
+        },
+      ],
+    };
+  } catch (error: unknown) {
+    console.error('Error in planTask tool:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during task planning.';
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Error during task planning: ${errorMessage}`,
+        },
+      ],
+    };
   }
-
-  // 使用prompt生成器獲取最終prompt
-  const prompt = getPlanTaskPrompt({
-    description,
-    requirements,
-    existingTasksReference,
-    completedTasks,
-    pendingTasks,
-    memoryDir: MEMORY_DIR,
-  });
-
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: prompt,
-      },
-    ],
-  };
 }
 
 // 分析問題工具
