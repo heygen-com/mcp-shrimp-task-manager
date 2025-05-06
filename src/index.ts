@@ -15,7 +15,6 @@ import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
-import { logToFile } from './utils/logUtils.js';
 
 // Import existing tool arrays
 // import { taskTools } from "./tools/taskTools.js";
@@ -237,7 +236,6 @@ async function main() {
       async (request: CallToolRequest) => {
         let result;
         const toolName = request.params.name;
-        await logToFile(`[Server] Received CallTool request for: ${toolName}`);
 
         try {
           if (!request.params.arguments) {
@@ -270,9 +268,6 @@ async function main() {
             case "execute_task":
               parsedArgs = await executeTaskSchema.parseAsync(request.params.arguments);
               result = await executeTask(parsedArgs);
-              // Log the type and value of the text field specifically
-              const textValue = result?.content?.[0]?.text;
-              await logToFile(`[Server] Returning result for execute_task. Text field type: ${typeof textValue}, Value: ${JSON.stringify(textValue)}`);
               break;
             case "verify_task":
               parsedArgs = await verifyTaskSchema.parseAsync(request.params.arguments);
@@ -320,30 +315,24 @@ async function main() {
               break;
             // Add case for the new consult_expert tool
             case "consult_expert":
-              await logToFile(`[Server] Calling consult_expert with args: ${JSON.stringify(request.params.arguments)}`); 
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
-              await logToFile(`[Server] Awaiting result from consultExpert...`); 
               result = await consultExpert(parsedArgs);
               // Limit log length for potentially long results
               // Use type assertion to fix TS error
               const resultSnippet = typeof result === 'string' 
                 ? (result as string).substring(0, 200) + ((result as string).length > 200 ? '...' : '') 
                 : JSON.stringify(result);
-              await logToFile(`[Server] Received result from consultExpert: ${resultSnippet}`); 
               break;
             // Add case for check_agent_status
             case "check_agent_status":
-              await logToFile(`[Server] Calling check_agent_status...`);
               // No args expected currently, parse arguments safely
               parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
               result = await checkAgentStatus(); // Call the function
-              await logToFile(`[Server] check_agent_status completed.`);
               break;  
             default:
               throw new Error(`Tool ${toolName} does not exist`);
           }
 
-          await logToFile(`[Server] Tool ${toolName} executed successfully. Preparing response.`);
           // Return the result with content array at the TOP level
           // Ensure 'result' has the correct structure expected by the handler
           // The tool functions (like checkAgentStatus) should return { content: [...] }
@@ -355,10 +344,6 @@ async function main() {
         } catch (error) {
           const errorMsg =
             error instanceof Error ? error.message : String(error);
-          await logToFile(`[Server] Error calling tool ${toolName}: ${errorMsg}`);
-          if (error instanceof Error && error.stack) {
-            await logToFile(`[Server] Error Stack: ${error.stack}`);
-          }
           console.error(`Error calling tool ${toolName}:`, errorMsg);
 
           // Return the error with content array at the TOP level

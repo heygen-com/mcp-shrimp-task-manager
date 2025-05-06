@@ -47,7 +47,6 @@ import {
   getClearAllTasksPrompt,
   getUpdateTaskContentPrompt,
 } from "../prompts/index.js";
-import { logToFile } from "../utils/logUtils.js";
 import { loadPromptFromTemplate, generatePrompt } from "../prompts/loader.js";
 
 // 開始規劃工具
@@ -679,9 +678,7 @@ export async function reportTaskResult({
   status,
   error,
 }: z.infer<typeof reportTaskResultSchema>) {
-  await logToFile(`[reportTaskResult] Reporting result for task ${taskId}: status=${status}, error=${error || 'None'}`);
   if (status === "failed" && !error) {
-    await logToFile(`[reportTaskResult] Error: status is 'failed' but no error message provided for task ${taskId}.`);
     return {
       content: [
         {
@@ -695,7 +692,6 @@ export async function reportTaskResult({
   const updatedTask = await recordTaskAttemptResult(taskId, status, error);
 
   if (!updatedTask) {
-    await logToFile(`[reportTaskResult] Error: Failed to record attempt result for task ${taskId}. Task might not exist or history missing.`);
     return {
       content: [
         {
@@ -709,10 +705,8 @@ export async function reportTaskResult({
   // 處理失敗情況
   if (status === "failed") {
     const loopDetection = detectTaskLoop(updatedTask, 2);
-    await logToFile(`[reportTaskResult] Loop detection for task ${taskId}: isLooping=${loopDetection.isLooping}`);
 
     if (loopDetection.isLooping) {
-      await logToFile(`[reportTaskResult] Loop detected for task ${taskId}. Prompting for consult_expert. Failure History: ${JSON.stringify(loopDetection.failureHistory)}`);
       // Load the mandatory consult prompt template
       const consultPromptTemplate = loadPromptFromTemplate("toolResponses/consultExpert.md");
       // Format the failure history for the prompt
@@ -734,7 +728,6 @@ export async function reportTaskResult({
         ],
       };
     } else {
-      await logToFile(`[reportTaskResult] Failure reported for task ${taskId}, but not a loop. Prompting for retry/plan adjustment.`);
       // TODO: Replace with real prompt generator call
       const retryPrompt = `## 任務失敗\n\n執行任務 '${updatedTask.name}' (ID: ${taskId}) 失敗。錯誤：${error}\n\n請分析失敗原因。你可以：\n1. 嘗試修正問題後，再次呼叫 'execute_task' 重試此任務。\n2. 如果問題無法解決或需要調整計劃，請使用 'plan_task' 或 'split_tasks' 修改任務。`;
       return {
@@ -750,7 +743,6 @@ export async function reportTaskResult({
 
   // 處理成功情況
   if (status === "succeeded") {
-    await logToFile(`[reportTaskResult] Success reported for task ${taskId}. Prompting for complete_task.`);
     // Load the success prompt template (Assuming one exists or using a simple string)
     // TODO: Create and use a dedicated template for this success message if needed
     const completePromptTemplate = loadPromptFromTemplate("toolResponses/reportSuccess.md"); // Assuming this template exists
@@ -769,7 +761,6 @@ export async function reportTaskResult({
   }
 
   // Default fallback (should not be reached)
-  await logToFile(`[reportTaskResult] Warning: Reached default fallback for task ${taskId}. Status was ${status}.`);
   return {
     content: [
         {
@@ -811,13 +802,7 @@ export async function completeTask({
 
   // ** Check if the task was already marked COMPLETED by report_task_result **
   if (task.status !== TaskStatus.COMPLETED) {
-      // This might indicate an incorrect workflow call (e.g., complete called before success reported)
-      // Optionally, force completion here, or return an error/warning.
-      // For now, let's return a warning and proceed to summary generation.
-      // await updateTaskStatus(taskId, TaskStatus.COMPLETED); // Removed - status set by recordTaskAttemptResult
        console.warn(`Warning: complete_task called for task ${taskId} which has status ${task.status}, expected COMPLETED.`);
-       // Consider if we should still call updateTaskSummary below or return an error.
-       // For robustness, let's allow summary update even if status is unexpected.
   }
 
   // 如果未提供摘要，嘗試自動生成
@@ -1281,7 +1266,6 @@ export async function getTaskDetail({
 export const checkAgentStatusSchema = z.object({}).describe("檢查當前進行中任務的狀態，以診斷可能的停滯情況。不需要參數。");
 
 export async function checkAgentStatus(): Promise<{ content: { type: "text"; text: string }[] }> {
-    await logToFile('[checkAgentStatus] Tool called.');
     try {
         const allTasks = await getAllTasks();
         const inProgressTasks = allTasks.filter(task => task.status === TaskStatus.IN_PROGRESS);
@@ -1289,11 +1273,9 @@ export async function checkAgentStatus(): Promise<{ content: { type: "text"; tex
         let statusSummaryLines: string[] = [];
 
         if (inProgressTasks.length === 0) {
-            await logToFile('[checkAgentStatus] No tasks currently IN_PROGRESS.');
             statusSummaryLines.push("目前沒有任何任務處於 IN_PROGRESS 狀態。");
             statusSummaryLines.push("建議使用 `list_tasks` 查看待處理任務，或使用 `plan_task` 開始新計劃。");
         } else {
-            await logToFile(`[checkAgentStatus] Found ${inProgressTasks.length} IN_PROGRESS tasks.`);
             statusSummaryLines.push("以下是目前 IN_PROGRESS 任務的狀態：");
             statusSummaryLines.push(""); // Add a blank line
 
@@ -1348,10 +1330,7 @@ export async function checkAgentStatus(): Promise<{ content: { type: "text"; tex
         const statusSummary = statusSummaryLines.join('\n'); // Join lines with newline
 
         // Construct final prompt using template literal for clarity
-        const prompt = `## Agent 狀態檢查
-
-${statusSummary}`;
-        await logToFile(`[checkAgentStatus] Generated status summary.`);
+        const prompt = `## Agent 狀態檢查\n\n${statusSummary}`;
 
         return {
             content: [
@@ -1364,7 +1343,6 @@ ${statusSummary}`;
 
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        await logToFile(`[checkAgentStatus] Error: ${errorMsg}`);
         // Ensure return type matches Promise<{ content: ... }>
         return {
             content: [

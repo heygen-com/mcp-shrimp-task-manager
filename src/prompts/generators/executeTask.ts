@@ -9,7 +9,6 @@ import {
   loadPromptFromTemplate,
 } from "../loader.js";
 import { Task, TaskStatus } from "../../types/index.js";
-import { logToFile } from "../../utils/logUtils.js";
 
 /**
  * 任務複雜度評估的介面
@@ -59,17 +58,13 @@ function getComplexityStyle(level: string): string {
 export async function getExecuteTaskPrompt(params: ExecuteTaskPromptParams): Promise<string> {
   const { task, complexityAssessment, relatedFilesSummary, dependencyTasks } =
     params;
-  await logToFile(`[getExecuteTaskPrompt] Generating prompt for task ${task.id}`);
 
   // *** Add logic for Expert Suggestions ***
   let formattedExpertSuggestion = "";
   if (task.expertSuggestions && task.expertSuggestions.length > 0) {
       const latestSuggestion = task.expertSuggestions[task.expertSuggestions.length - 1];
-      await logToFile(`[getExecuteTaskPrompt] Found expert suggestion for task ${task.id}: ${latestSuggestion.advice.substring(0,100)}...`);
       // Format the suggestion nicely for the prompt
       formattedExpertSuggestion = `## Expert Suggestion (from ${latestSuggestion.timestamp.toISOString()})\n\n${latestSuggestion.advice}\n\n---\n`;
-  } else {
-      await logToFile(`[getExecuteTaskPrompt] No expert suggestions found for task ${task.id}`);
   }
   // *** End Expert Suggestions logic ***
 
@@ -181,7 +176,6 @@ export async function getExecuteTaskPrompt(params: ExecuteTaskPromptParams): Pro
 
   // Inject the expert suggestion at the beginning of the prompt
   prompt = formattedExpertSuggestion + prompt;
-  await logToFile(`[getExecuteTaskPrompt] Final prompt generated for task ${task.id} (length: ${prompt.length})`);
 
   // 載入可能的自定義 prompt
   return loadPrompt(prompt, "EXECUTE_TASK");
