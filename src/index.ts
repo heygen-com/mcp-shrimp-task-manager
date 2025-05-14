@@ -15,7 +15,7 @@ import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
-import { checkBrowserLogs, checkBrowserLogsSchema } from './tools/browserTools.js';
+import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
 import {
   planTask,
   planTaskSchema,
@@ -51,6 +51,7 @@ import {
 import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
 import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
 import { logDataDir, logDataDirSchema } from "./tools/debugTools.js";
+import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
 
 async function main() {
   try {
@@ -209,6 +210,8 @@ async function main() {
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
           { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
+          { name: "list_browser_tabs", description: listBrowserTabs.description, inputSchema: zodToJsonSchema(listBrowserTabsSchema) },
+          { name: "checkpoint", description: "AI-powered git checkpoint: detects changes, gathers diffs, groups by logical change, generates commit messages, and commits/pushes atomically.", inputSchema: zodToJsonSchema(checkpointSchema) },
         ],
       };
     });
@@ -308,6 +311,14 @@ async function main() {
             case "check_browser_logs":
               parsedArgs = await checkBrowserLogsSchema.parseAsync(request.params.arguments || {}); // Accepts empty object
               result = await checkBrowserLogs.execute(parsedArgs); // Call the execute method
+              break;
+            case "list_browser_tabs":
+              parsedArgs = await listBrowserTabsSchema.parseAsync(request.params.arguments || {});
+              result = await listBrowserTabs.execute(); // Corrected: execute() takes no arguments
+              break;
+            case "checkpoint":
+              parsedArgs = await checkpointSchema.parseAsync(request.params.arguments);
+              result = await checkpoint(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);
