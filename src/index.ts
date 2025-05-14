@@ -211,7 +211,7 @@ async function main() {
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
           { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
           { name: "list_browser_tabs", description: listBrowserTabs.description, inputSchema: zodToJsonSchema(listBrowserTabsSchema) },
-          { name: "checkpoint", description: "AI-powered git checkpoint: detects changes, gathers diffs, groups by logical change, generates commit messages, and commits/pushes atomically.", inputSchema: zodToJsonSchema(checkpointSchema) },
+          { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
         ],
       };
     });
