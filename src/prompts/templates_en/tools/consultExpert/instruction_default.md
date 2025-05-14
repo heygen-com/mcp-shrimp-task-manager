@@ -1,1 +1,1 @@
-Please provide a concise suggestion or approach to overcome this problem. 
+Please provide a concise suggestion or approach to overcome this problem. Format your response as a JSON object with a single key 'advice' containing your expert suggestion as a string. 

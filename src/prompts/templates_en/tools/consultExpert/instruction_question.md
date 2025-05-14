@@ -1,1 +1,1 @@
-Provide a concise and direct answer. 
+Provide a concise and direct answer. Format your response as a JSON object with a single key 'advice' containing your expert answer as a string. 

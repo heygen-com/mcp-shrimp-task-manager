@@ -1,1 +1,1 @@
-Provide the requested information or code. 
+Provide the requested information or code. Format your response as a JSON object with a single key 'advice' containing your expert response as a string. 

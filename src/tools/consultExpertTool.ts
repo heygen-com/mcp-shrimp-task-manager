@@ -26,9 +26,32 @@ async function callOpenAI(prompt: string): Promise<string> {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o', // Or another preferred model
       messages: [{ role: 'user', content: prompt }],
+      response_format: { type: "json_object" }, // Ask OpenAI to return JSON
     });
-    const suggestion = completion.choices[0]?.message?.content || 'No suggestion received from expert.';
-    return suggestion;
+
+    let rawContent = completion.choices[0]?.message?.content;
+
+    if (rawContent) {
+      try {
+        // OpenAI should return a JSON string, parse it
+        const parsedJson = JSON.parse(rawContent);
+        // We expect a specific structure like { "advice": "..." } due to our prompts
+        if (parsedJson && typeof parsedJson.advice === 'string') {
+          return parsedJson.advice; // Return the core advice string
+        } else {
+          // The JSON is not in the expected format, return the stringified JSON content.
+          console.warn('OpenAI returned JSON but not in the expected { "advice": "..." } format. Returning raw JSON string.');
+          return rawContent;
+        }
+      } catch (e) {
+        // If JSON.parse fails, OpenAI didn't adhere to response_format: { type: "json_object" }
+        // or the content was not a string.
+        console.warn('Failed to parse JSON response from OpenAI, though JSON was requested. Returning raw content string.', e);
+        return rawContent; // Fallback to raw content string
+      }
+    } else {
+      return 'No suggestion received from expert.';
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error calling OpenAI API:', error); // Keep console for potential visibility
