@@ -40,6 +40,8 @@ export interface TaskAttempt {
 export interface ExpertSuggestion {
   timestamp: Date; // 建議的時間戳
   advice: string; // 專家提供的建議內容
+  problemDescription: string; // The problem description that prompted this suggestion
+  relevantContext: string; // The relevant context provided for this suggestion
 }
 
 // 任務介面：定義任務的完整數據結構
