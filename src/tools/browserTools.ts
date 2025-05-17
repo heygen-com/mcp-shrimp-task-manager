@@ -31,11 +31,11 @@ interface TabInfo {
 export const listBrowserTabsSchema = z.object({});
 
 /**
- * Fetches the latest logs from the most recently active tab recorded by the MCP DevTools Bridge.
+ * Fetches all available console logs, network requests, or other events for the most recently active browser tab from the MCP DevTools Bridge server (running on ${SERVER_BASE_URL}). Logs are cleared from the server after being fetched. Useful for debugging web application issues, especially for capturing an initial snapshot of browser activity.
  */
 export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
   name: 'check_browser_logs',
-  description: `Fetches the latest ${DEFAULT_MAX_LOGS} console logs, network requests, or other events from the most recently active browser tab being monitored by the MCP DevTools Bridge server (running on ${SERVER_BASE_URL}). Useful for debugging web application issues.`, // Updated description
+  description: `Fetches all available console logs, network requests, or other events for the most recently active browser tab from the MCP DevTools Bridge server (running on ${SERVER_BASE_URL}). Logs are cleared from the server after being fetched. Useful for debugging web application issues, especially for capturing an initial snapshot of browser activity.`,
   schema: checkBrowserLogsSchema,
   execute: async () => {
     let tabs: TabInfo[] = [];
@@ -100,36 +100,70 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
           };
       }
 
-      // After successfully "reading" logs (even if empty), attempt to delete them from the server.
+      // Attempt to delete logs from the server after fetching them.
+      // This ensures that the next call gets fresh logs.
       try {
         await axios.delete(`${SERVER_BASE_URL}/logs`, { params: { tabId: targetTabId } });
         console.log(`Successfully requested deletion of logs from server for tab ID: ${targetTabId}`);
       } catch (deleteError: any) {
         console.error(`Attempt to delete logs from server for tab ID ${targetTabId} failed: ${deleteError.message || deleteError}`);
         // Log the error, but proceed to return the fetched logs.
-        // The primary function is to return logs; deletion is a secondary cleanup.
       }
 
-      // Get the latest logs from the fetched data to return to the user
-      const latestLogs = logs.slice(-DEFAULT_MAX_LOGS);
+      // Check for a "monitoring started" type message
+      let monitoringStartedMessageFound = false;
+      const monitoringKeywords = ["monitoring started", "logs started", "recording started", "browser context monitoring started"];
+      for (const log of logs) {
+        let messageText = '';
+        if (typeof log.data === 'string') {
+          messageText = log.data;
+        } else if (log.data && typeof log.data.message === 'string') {
+          messageText = log.data.message;
+        } else if (log.data && typeof log.data.text === 'string') {
+          messageText = log.data.text;
+        } else if (log.data && Array.isArray(log.data.args)) { // Check for console.log style args
+            messageText = log.data.args.join(' ');
+        }
 
-      if (latestLogs.length === 0) {
+
+        if (messageText) {
+          for (const keyword of monitoringKeywords) {
+            if (messageText.toLowerCase().includes(keyword)) {
+              monitoringStartedMessageFound = true;
+              break;
+            }
+          }
+        }
+        if (monitoringStartedMessageFound) break;
+      }
+
+      const startupMessageInfo = monitoringStartedMessageFound
+        ? "A 'monitoring started' type message was found in the logs."
+        : "No specific 'monitoring started' type message was detected in the logs. This is informational and may not indicate an issue.";
+
+
+      if (logs.length === 0) {
         return {
           content: [
             {
               type: "text" as const,
-              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}). This might mean no new browser activity was captured since the last check, or that monitoring for this tab isn't capturing the specific events you're interested in. Server-side logs for this tab ID were requested to be cleared.`,
+              text: `No logs found for the most recent tab (ID: ${targetTabId}, URL: ${latestTab.url}). This might mean no new browser activity was captured or that monitoring isn't capturing events. Server-side logs for this tab ID were requested to be cleared. ${startupMessageInfo}`,
             },
           ],
         };
       }
 
-      // Return the logs as a JSON string, wrapped in the content structure
+      // Return all fetched logs
+      const returnedLogs = logs; // No longer slicing with DEFAULT_MAX_LOGS
+
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(latestLogs, null, 2),
+            text: `Fetched ${returnedLogs.length} log entr(y|ies) for tab ID: ${targetTabId} (URL: ${latestTab.url}).
+${startupMessageInfo}
+Logs (cleared from server after this fetch):
+${JSON.stringify(returnedLogs, null, 2)}`,
           },
         ],
       };
