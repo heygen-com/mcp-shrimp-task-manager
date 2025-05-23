@@ -13,11 +13,23 @@
   - Support for multiple target languages
   - Automatic persistence of translation history in `DATA_DIR/translation_memory/`
   - Integration with task management system
-- Comprehensive [Translation Tool Guide](docs/translation-tool-guide.md) with examples
+- **New `retranslate_i18n` Tool**: Automated i18n file translation tool with:
+  - Reads English JSON source files and translates to multiple languages
+  - Preserves existing translations (only translates missing keys by default)
+  - Protects company names, product names, and technical terms
+  - Maintains JSON structure and i18next interpolation variables
+  - Provides namespace-specific context for accurate translations
+  - Supports dry-run mode to preview changes
+  - Generates detailed reports of translation operations
+- Comprehensive documentation:
+  - [Translation Tool Guide](docs/translation-tool-guide.md) with examples
+  - [i18n Retranslation Guide](docs/i18n-retranslation-guide.md) for project integration
+  - [Testing Guide](docs/testing-translation-tool.md) for validation
 
 ### Improved
 - Translation quality through context awareness (e.g., distinguishing "credit" in educational vs financial contexts)
 - Consistency of translations across projects through translation memory
+- i18n workflow efficiency by automating repetitive translation tasks
 
 ## [1.0.13]
 

@@ -17,6 +17,7 @@ import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
 import { translateContent, translateContentSchema } from './tools/translationTool.js';
+import { retranslateI18n, retranslateI18nSchema } from './tools/i18nRetranslationTool.js';
 import {
   planTask,
   planTaskSchema,
@@ -217,6 +218,7 @@ async function main() {
           { name: "analyze_pr", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(analyzePRSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
           { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
+          { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
         ],
       };
     });
@@ -336,6 +338,10 @@ async function main() {
             case "translate_content":
               parsedArgs = await translateContentSchema.parseAsync(request.params.arguments);
               result = await translateContent(parsedArgs);
+              break;
+            case "retranslate_i18n":
+              parsedArgs = await retranslateI18nSchema.parseAsync(request.params.arguments);
+              result = await retranslateI18n(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);

@@ -51,6 +51,7 @@ Shrimp Task Manager guides Agents through structured workflows for systematic pr
 - **Developer Chat Tools**:
   - `consult_expert` - Ask for help when stuck. *Note: This uses the OpenAI API and requires an `OPENAI_API_KEY` environment variable.*
   - `translate_content` - Context-aware translations with learning capabilities and agent-to-agent dialog support. See [Translation Tool Guide](docs/translation-tool-guide.md) for details.
+  - `retranslate_i18n` - Automatically retranslate i18n JSON files from English to multiple languages. See [i18n Retranslation Guide](docs/i18n-retranslation-guide.md) for details.
   - `check_browser_logs` - Fetch console logs from browser tabs (*requires mcp-devtools-bridge*)
   - `list_browser_tabs` - List monitored browser tabs (*requires mcp-devtools-bridge*)
   - `analyze_pr` - Analyze GitHub pull requests for code quality
