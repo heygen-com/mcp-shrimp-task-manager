@@ -50,8 +50,9 @@ import {
 } from "./tools/taskTools.js";
 import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
 import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
-import { logDataDir, logDataDirSchema } from "./tools/debugTools.js";
+import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debugTools.js";
 import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
+import { analyzePR, analyzePRSchema } from "./tools/prAnalysisTools.js";
 
 async function main() {
   try {
@@ -212,6 +213,8 @@ async function main() {
           { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
           { name: "list_browser_tabs", description: listBrowserTabs.description, inputSchema: zodToJsonSchema(listBrowserTabsSchema) },
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
+          { name: "analyze_pr", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(analyzePRSchema) },
+          { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
         ],
       };
     });
@@ -297,7 +300,7 @@ async function main() {
               break;
             case "log_data_dir":
               parsedArgs = await logDataDirSchema.parseAsync(request.params.arguments || {});
-              result = await logDataDir();
+              result = await logDataDir(parsedArgs);
               break;
             case "consult_expert":
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
@@ -319,6 +322,14 @@ async function main() {
             case "checkpoint":
               parsedArgs = await checkpointSchema.parseAsync(request.params.arguments);
               result = await checkpoint(parsedArgs);
+              break;
+            case "analyze_pr":
+              parsedArgs = await analyzePRSchema.parseAsync(request.params.arguments);
+              result = await analyzePR(parsedArgs);
+              break;
+            case "check_env":
+              parsedArgs = await checkEnvSchema.parseAsync(request.params.arguments || {});
+              result = await checkEnv(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);

@@ -47,6 +47,7 @@ Shrimp Task Manager guides Agents through structured workflows for systematic pr
 - **Thought Chain Process**: Step-by-step reasoning to analyze complex problems systematically
 - **Project Rules Initialization**: Define project standards and rules to maintain consistency across large projects
 - **<a id="web-gui"></a>Web GUI**: Provides an optional web-based graphical user interface for task management. Enable by setting `ENABLE_GUI=true` in your `.env` file. When enabled, a `WebGUI.md` file containing the access address will be created in your `DATA_DIR`.
+- **Pull Request Analysis**: Analyze GitHub, GitLab, and Bitbucket pull requests to generate comprehensive markdown reports for tracking feature development
 
 ## 🧭 <a id="usage-guide"></a>Usage Guide
 
@@ -360,10 +361,12 @@ After configuration, you can use the following tools:
 | **Task Execution**      | `execute_task`       | Execute specific tasks                           |
 |                         | `verify_task`        | Verify task completion                           |
 |                         | `complete_task`      | Mark tasks as completed                          |
+| **Code Analysis**       | `analyze_pr`         | Analyze pull requests and generate reports       |
 | **Debugging**           | `log_data_dir`       | Log the path to the tasks.json file              |
 
 > **Note on Custom Tools (Heygen Fork):** This fork may include additional custom tools not present in the original repository. Currently, it includes:
 > - `log_data_dir`: A debugging tool to log the absolute path being used for `tasks.json` based on the `DATA_DIR` configuration.
+> - `analyze_pr`: Analyze pull requests from GitHub, GitLab, or Bitbucket to generate structured markdown reports with code quality assessments, issues, and recommendations.
 
 ## 🔧 Technical Implementation
 
