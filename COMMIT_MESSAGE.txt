@@ -1,0 +1,13 @@
+feat(tools): add context-aware translation tool with learning capabilities
+
+- Add translate_content tool for intelligent, context-aware translations
+- Implement agent-to-agent dialog for disambiguation
+- Create persistent translation memory system
+- Support multiple domains (education, finance, technical, etc.)
+- Include comprehensive test suite and documentation
+
+The tool learns from past translations to improve consistency and quality
+over time. All translations are persisted in DATA_DIR/translation_memory/
+and automatically referenced in future translations.
+
+BREAKING CHANGE: Requires OPENAI_API_KEY environment variable 

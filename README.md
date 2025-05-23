@@ -48,6 +48,12 @@ Shrimp Task Manager guides Agents through structured workflows for systematic pr
 - **Project Rules Initialization**: Define project standards and rules to maintain consistency across large projects
 - **<a id="web-gui"></a>Web GUI**: Provides an optional web-based graphical user interface for task management. Enable by setting `ENABLE_GUI=true` in your `.env` file. When enabled, a `WebGUI.md` file containing the access address will be created in your `DATA_DIR`.
 - **Pull Request Analysis**: Analyze GitHub, GitLab, and Bitbucket pull requests to generate comprehensive markdown reports for tracking feature development
+- **Developer Chat Tools**:
+  - `consult_expert` - Ask for help when stuck. *Note: This uses the OpenAI API and requires an `OPENAI_API_KEY` environment variable.*
+  - `translate_content` - Context-aware translations with learning capabilities and agent-to-agent dialog support. See [Translation Tool Guide](docs/translation-tool-guide.md) for details.
+  - `check_browser_logs` - Fetch console logs from browser tabs (*requires mcp-devtools-bridge*)
+  - `list_browser_tabs` - List monitored browser tabs (*requires mcp-devtools-bridge*)
+  - `analyze_pr` - Analyze GitHub pull requests for code quality
 
 ## 🧭 <a id="usage-guide"></a>Usage Guide
 

@@ -16,6 +16,7 @@ import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
+import { translateContent, translateContentSchema } from './tools/translationTool.js';
 import {
   planTask,
   planTaskSchema,
@@ -215,6 +216,7 @@ async function main() {
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
           { name: "analyze_pr", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(analyzePRSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
+          { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
         ],
       };
     });
@@ -330,6 +332,10 @@ async function main() {
             case "check_env":
               parsedArgs = await checkEnvSchema.parseAsync(request.params.arguments || {});
               result = await checkEnv(parsedArgs);
+              break;
+            case "translate_content":
+              parsedArgs = await translateContentSchema.parseAsync(request.params.arguments);
+              result = await translateContent(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);

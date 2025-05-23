@@ -2,6 +2,23 @@
 
 # Changelog
 
+## [1.0.14] - 2025-01-XX
+
+### Added
+- **New `translate_content` Tool**: Advanced context-aware translation tool with:
+  - Agent-to-agent dialog support for clarification when context is ambiguous
+  - Translation memory that learns from past translations 
+  - Domain-specific translation patterns (education, finance, technical, etc.)
+  - Confidence scoring and alternative translations
+  - Support for multiple target languages
+  - Automatic persistence of translation history in `DATA_DIR/translation_memory/`
+  - Integration with task management system
+- Comprehensive [Translation Tool Guide](docs/translation-tool-guide.md) with examples
+
+### Improved
+- Translation quality through context awareness (e.g., distinguishing "credit" in educational vs financial contexts)
+- Consistency of translations across projects through translation memory
+
 ## [1.0.13]
 
 ### Fixed

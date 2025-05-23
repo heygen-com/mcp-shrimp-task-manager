@@ -14,3 +14,21 @@
 *   **Agent-Side Considerations Noted:**
     *   Agents must provide `taskId`s in the correct UUID format for tools like `consult_expert` (Zod validation in `src/index.ts` will reject otherwise).
     *   If `consult_expert` is called with a `taskId` for a non-existent task, it will warn and not persist advice. This is an agent workflow/task lifecycle consideration. 
+
+2025-01-XX: (Context-Aware Translation Tool Design)
+*   **Problem:** Basic i18n translation approaches produce inconsistent results because they lack context. Words like "credit" can mean different things in educational vs financial contexts.
+*   **Solution:** Built a sophisticated translation tool (`translate_content`) with:
+    1.  **Context Awareness**: Accepts domain and context parameters to disambiguate terms
+    2.  **Agent-to-Agent Dialog**: When context is ambiguous, the translation agent can ask clarifying questions, creating a dialog that can be continued with `previousDialogId`
+    3.  **Translation Memory**: Stores all translations in `DATA_DIR/translation_memory/` organized by language pairs, including confidence scores, usage counts, and context
+    4.  **Learning Capability**: The tool references past translations and improves over time, with frequently used translations gaining higher confidence
+*   **Implementation Pattern**: 
+    1.  Modeled after `consultExpert` tool for dialog management
+    2.  Uses OpenAI API with JSON response format for structured output
+    3.  Maintains separate storage for translation memory and active dialogs
+    4.  Includes domain-specific patterns (education, finance, technical, etc.)
+*   **Key Takeaways**:
+    - Context is crucial for accurate translations - the same term can have very different meanings
+    - Translation memory significantly improves consistency across a project
+    - Agent-to-agent dialog is valuable when automated systems need clarification
+    - Structured data (JSON) storage enables learning and pattern recognition over time 
