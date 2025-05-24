@@ -18,6 +18,7 @@ import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTo
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
 import { translateContent, translateContentSchema } from './tools/translationTool.js';
 import { retranslateI18n, retranslateI18nSchema } from './tools/i18nRetranslationTool.js';
+import { consolidateTranslationMemory, consolidateTranslationMemorySchema } from './tools/consolidateTranslationMemory.js';
 import {
   planTask,
   planTaskSchema,
@@ -219,6 +220,7 @@ async function main() {
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
           { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
+          { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
         ],
       };
     });
@@ -342,6 +344,10 @@ async function main() {
             case "retranslate_i18n":
               parsedArgs = await retranslateI18nSchema.parseAsync(request.params.arguments);
               result = await retranslateI18n(parsedArgs);
+              break;
+            case "consolidate_translation_memory":
+              parsedArgs = await consolidateTranslationMemorySchema.parseAsync(request.params.arguments);
+              result = await consolidateTranslationMemory(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);

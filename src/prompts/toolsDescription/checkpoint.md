@@ -1,1 +1,0 @@
-AI-powered git checkpoint: detects changes, gathers diffs, groups by logical change, generates commit messages, and commits/pushes atomically. 

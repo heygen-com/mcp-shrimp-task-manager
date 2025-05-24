@@ -2,34 +2,29 @@
 
 # Changelog
 
-## [1.0.14] - 2025-01-XX
+## [1.0.14] - 2025-05-24
 
 ### Added
-- **New `translate_content` Tool**: Advanced context-aware translation tool with:
-  - Agent-to-agent dialog support for clarification when context is ambiguous
-  - Translation memory that learns from past translations 
-  - Domain-specific translation patterns (education, finance, technical, etc.)
-  - Confidence scoring and alternative translations
-  - Support for multiple target languages
-  - Automatic persistence of translation history in `DATA_DIR/translation_memory/`
-  - Integration with task management system
-- **New `retranslate_i18n` Tool**: Automated i18n file translation tool with:
-  - Reads English JSON source files and translates to multiple languages
-  - Preserves existing translations (only translates missing keys by default)
-  - Protects company names, product names, and technical terms
-  - Maintains JSON structure and i18next interpolation variables
-  - Provides namespace-specific context for accurate translations
-  - Supports dry-run mode to preview changes
-  - Generates detailed reports of translation operations
-- Comprehensive documentation:
-  - [Translation Tool Guide](docs/translation-tool-guide.md) with examples
-  - [i18n Retranslation Guide](docs/i18n-retranslation-guide.md) for project integration
-  - [Testing Guide](docs/testing-translation-tool.md) for validation
+- **Translation Memory Caching**: Translation tool now checks memory cache first before calling OpenAI
+  - Exact matches with high confidence (≥95%) are returned immediately
+  - Reduces API calls and response time from 4-6s to <10ms for cached translations
+  - Updates usage counts for better tracking
+
+- **Consolidate Translation Memory Tool**: New tool to optimize translation storage
+  - Extracts translations from all dialog files
+  - Removes duplicates while keeping highest confidence versions
+  - Merges with existing memory and updates usage counts
+  - Optional cleanup of processed dialog files
+  - Provides detailed consolidation reports and statistics
+
+### Fixed
+- Fixed date serialization issue in translation memory causing "getTime is not a function" errors
+- Translation tool now properly revives Date objects when loading from JSON
 
 ### Improved
-- Translation quality through context awareness (e.g., distinguishing "credit" in educational vs financial contexts)
-- Consistency of translations across projects through translation memory
-- i18n workflow efficiency by automating repetitive translation tasks
+- Significantly improved translation performance for repeated content
+- Better memory management by consolidating duplicate translations
+- More efficient storage by removing unnecessary dialog files
 
 ## [1.0.13]
 

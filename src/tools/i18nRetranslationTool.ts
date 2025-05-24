@@ -1,16 +1,19 @@
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs/promises';
-import { translateContent } from './translationTool.js';
+import { translateContent, setVerboseLogging } from './translationTool.js';
 
 // Define the input schema
 export const RetranslateI18nInputSchema = z.object({
   projectPath: z.string().describe('Absolute path to the project root (e.g., /Users/co/dev/heygen/pacific)'),
+  localesBasePath: z.string().describe('Base path to the locales directory (e.g., packages/movio/public/locales)'),
+  sourceLocale: z.string().default('en-US').describe('The source locale for English files (e.g., en-US)'),
   namespace: z.string().describe('The namespace to retranslate (e.g., "Auth", "Home", "Welcome")'),
-  targetLanguages: z.array(z.string()).default(['pt-BR', 'ko-KR', 'es-MS']).describe('Target languages to translate to'),
+  targetLocales: z.array(z.string()).default(['pt-BR', 'ko-KR', 'es-MS']).describe('Target languages to translate to'),
   dryRun: z.boolean().default(false).describe('If true, shows what would be translated without making changes'),
   preserveExisting: z.boolean().default(true).describe('If true, only translates missing keys; if false, retranslates all keys'),
-  domain: z.string().default('ui').describe('Translation domain context (e.g., "ui", "auth", "marketing")')
+  domain: z.string().default('ui').describe('Translation domain context (e.g., "ui", "auth", "marketing")'),
+  verbose: z.boolean().default(false).describe('Enable verbose logging for debugging')
 });
 
 // Terms that should never be translated
@@ -150,11 +153,12 @@ async function translateObject(
 // Main retranslation function
 export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInputSchema>): Promise<{ content: { type: "text"; text: string }[] }> {
   try {
-    const { projectPath, namespace, targetLanguages, dryRun, preserveExisting, domain } = params;
+    const { projectPath, localesBasePath, sourceLocale, namespace, targetLocales, dryRun, preserveExisting, domain, verbose } = params;
+    setVerboseLogging(verbose);
     
     // Construct paths
-    const localesPath = path.join(projectPath, 'packages/movio/public/locales');
-    const englishFilePath = path.join(localesPath, 'en-US', `${namespace}.json`);
+    const localesPath = path.isAbsolute(localesBasePath) ? localesBasePath : path.join(projectPath, localesBasePath);
+    const englishFilePath = path.join(localesPath, sourceLocale, `${namespace}.json`);
     
     // Check if English file exists
     try {
@@ -163,7 +167,7 @@ export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInpu
       return {
         content: [{
           type: "text" as const,
-          text: `❌ Error: English source file not found at ${englishFilePath}`
+          text: `❌ Error: English source file not found at ${englishFilePath}. Please provide the correct localesBasePath and sourceLocale.`
         }]
       };
     }
@@ -189,14 +193,14 @@ export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInpu
     report += `**Namespace:** ${namespace}\n`;
     report += `**Source:** ${englishFilePath}\n`;
     report += `**Total Keys:** ${totalKeys}\n`;
-    report += `**Target Languages:** ${targetLanguages.join(', ')}\n`;
+    report += `**Target Languages:** ${targetLocales.join(', ')}\n`;
     report += `**Mode:** ${dryRun ? 'DRY RUN' : 'LIVE'}\n`;
     report += `**Preserve Existing:** ${preserveExisting ? 'Yes' : 'No'}\n`;
     report += `**Domain:** ${domain}\n`;
     report += `**Context:** ${context}\n\n`;
     
     // Process each target language
-    for (const targetLang of targetLanguages) {
+    for (const targetLang of targetLocales) {
       report += `## ${targetLang}\n\n`;
       
       const targetFilePath = path.join(localesPath, targetLang, `${namespace}.json`);

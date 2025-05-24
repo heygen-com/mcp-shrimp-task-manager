@@ -9,6 +9,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
 
+// Verbose logging flag (can be toggled from the agent side or via the 'verbose' parameter in tool input)
+// To enable: setVerboseLogging(true) or pass { verbose: true } in the tool input if supported.
+export let VERBOSE_LOGGING = false;
+export function setVerboseLogging(value: boolean) {
+  VERBOSE_LOGGING = value;
+}
+function vLog(...args: any[]) {
+  if (VERBOSE_LOGGING) {
+    console.error('[translationTool][VERBOSE]', ...args);
+  }
+}
+
 // Define the input schema for the translation tool
 export const TranslateContentInputSchema = z.object({
   content: z.string().describe('The content to translate (can be a single term or multiple strings)'),
@@ -19,6 +31,8 @@ export const TranslateContentInputSchema = z.object({
   domain: z.string().optional().describe('Domain/category for this translation (e.g., "education", "finance", "ui", "error_messages")'),
   requestClarification: z.boolean().default(false).describe('Whether the secondary agent should request clarification if context is ambiguous'),
   previousDialogId: z.string().optional().describe('ID of previous dialog to continue conversation'),
+  // Optionally enable verbose logging for debugging
+  verbose: z.boolean().optional().describe('Enable verbose logging for debugging (default: false)')
 });
 
 // Dialog turn structure
@@ -60,12 +74,14 @@ interface TranslationDialog {
 async function getTranslationMemoryDir(): Promise<string> {
   const dataDir = process.env.DATA_DIR || path.join(PROJECT_ROOT, "data");
   const memoryDir = path.join(dataDir, 'translation_memory');
+  vLog('Ensuring translation memory directory exists at', memoryDir);
   
   // Ensure directory exists
   try {
     await fs.access(memoryDir);
   } catch {
     await fs.mkdir(memoryDir, { recursive: true });
+    vLog('Created translation memory directory:', memoryDir);
   }
   
   return memoryDir;
@@ -75,11 +91,31 @@ async function getTranslationMemoryDir(): Promise<string> {
 async function loadTranslationMemory(sourceLanguage: string, targetLanguage: string): Promise<TranslationMemoryEntry[]> {
   const memoryDir = await getTranslationMemoryDir();
   const memoryFile = path.join(memoryDir, `${sourceLanguage}_to_${targetLanguage}.json`);
+  vLog('Loading translation memory from', memoryFile);
   
+  function reviveDates(entry: any) {
+    if (entry.lastUsed && typeof entry.lastUsed === 'string') {
+      entry.lastUsed = new Date(entry.lastUsed);
+    }
+    if (entry.created && typeof entry.created === 'string') {
+      entry.created = new Date(entry.created);
+    }
+    if (entry.dialog && Array.isArray(entry.dialog)) {
+      entry.dialog.forEach((turn: any) => {
+        if (turn.timestamp && typeof turn.timestamp === 'string') {
+          turn.timestamp = new Date(turn.timestamp);
+        }
+      });
+    }
+    return entry;
+  }
+
   try {
     const data = await fs.readFile(memoryFile, 'utf-8');
-    return JSON.parse(data);
-  } catch {
+    vLog('Loaded translation memory data:', data.length, 'bytes');
+    return JSON.parse(data).map(reviveDates);
+  } catch (err) {
+    vLog('No translation memory found at', memoryFile, 'or failed to load:', err instanceof Error ? err.message : String(err));
     // Return empty array if file doesn't exist
     return [];
   }
@@ -93,6 +129,7 @@ async function saveTranslationMemory(
 ): Promise<void> {
   const memoryDir = await getTranslationMemoryDir();
   const memoryFile = path.join(memoryDir, `${sourceLanguage}_to_${targetLanguage}.json`);
+  vLog('Saving translation memory to', memoryFile, 'with', memory.length, 'entries');
   
   // Sort by usage count and last used date for better retrieval
   memory.sort((a, b) => {
@@ -103,6 +140,7 @@ async function saveTranslationMemory(
   });
   
   await fs.writeFile(memoryFile, JSON.stringify(memory, null, 2), 'utf-8');
+  vLog('Saved translation memory to', memoryFile);
 }
 
 // Find similar translations in memory
@@ -155,7 +193,7 @@ async function callOpenAIForTranslation(
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY environment variable is not set.');
   }
-
+  vLog('Calling OpenAI for translation. Prompt length:', prompt.length);
   const openai = new OpenAI({ apiKey });
 
   try {
@@ -167,21 +205,25 @@ async function callOpenAIForTranslation(
     });
 
     const rawContent = completion.choices[0]?.message?.content;
+    vLog('OpenAI response received. Content length:', rawContent?.length || 0);
 
     if (rawContent) {
       if (isJsonResponse) {
         try {
           return JSON.parse(rawContent);
         } catch (e) {
+          vLog('Failed to parse JSON response from OpenAI:', rawContent);
           throw new Error(`Failed to parse JSON response from OpenAI: ${rawContent}`);
         }
       }
       return rawContent;
     } else {
+      vLog('No response received from OpenAI.');
       throw new Error('No response received from OpenAI.');
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
+    vLog('Error from OpenAI:', message);
     throw new Error(`Failed to get translation from OpenAI: ${message}`);
   }
 }
@@ -276,14 +318,67 @@ export async function translateContent(params: z.infer<typeof TranslateContentIn
       context, 
       domain, 
       requestClarification,
-      previousDialogId 
+      previousDialogId,
+      verbose
     } = params;
+
+    // Set verbose logging if specified
+    if (verbose !== undefined) {
+      setVerboseLogging(verbose);
+    }
+
+    vLog('translateContent called with params:', JSON.stringify(params));
 
     // Load translation memory
     const memory = await loadTranslationMemory(sourceLanguage, targetLanguage);
+    vLog('Loaded translation memory entries:', memory.length);
     
     // Find similar translations
     const similarTranslations = findSimilarTranslations(content, memory, context, domain);
+    vLog('Found similar translations:', similarTranslations.length);
+    
+    // Check for exact match with high confidence
+    if (similarTranslations.length > 0) {
+      const exactMatch = similarTranslations.find(t => 
+        t.sourceText === content &&
+        t.confidence >= 0.95 &&
+        t.domain === domain &&
+        t.context === context
+      );
+      
+      if (exactMatch) {
+        vLog('Found exact match in translation memory, using cached translation');
+        
+        // Update usage count and last used
+        const existingIndex = memory.findIndex(e => e.id === exactMatch.id);
+        if (existingIndex >= 0) {
+          memory[existingIndex].usageCount++;
+          memory[existingIndex].lastUsed = new Date();
+          await saveTranslationMemory(sourceLanguage, targetLanguage, memory);
+        }
+        
+        // Return cached translation
+        return {
+          content: [{
+            type: "text" as const,
+            text: `## Translation Result (from cache)
+
+**Source (${sourceLanguage}):** "${content}"
+**Target (${targetLanguage}):** "${exactMatch.targetText}"
+
+**Confidence:** ${(exactMatch.confidence * 100).toFixed(0)}%
+**Domain:** ${domain || 'general'}
+**Context:** ${context || 'none'}
+**Cache hits:** ${exactMatch.usageCount + 1} times
+**Last used:** ${exactMatch.lastUsed.toISOString()}
+
+### Translation Notes:
+This translation was retrieved from cache. It has been used successfully ${exactMatch.usageCount + 1} times with high confidence.
+`
+          }]
+        };
+      }
+    }
     
     // Load or create dialog
     let dialog = await loadDialog(previousDialogId);
@@ -299,10 +394,14 @@ export async function translateContent(params: z.infer<typeof TranslateContentIn
         created: new Date(),
         lastUpdated: new Date()
       };
+      vLog('Created new dialog:', dialog.id);
+    } else {
+      vLog('Loaded existing dialog:', dialog.id);
     }
     
     // Generate learning notes
     const learningNotes = await generateLearningNotes(sourceLanguage, targetLanguage, domain);
+    vLog('Generated learning notes length:', learningNotes.length);
     
     // Build prompt
     let prompt = `You are an expert translator specializing in context-aware, accurate translations. 
@@ -353,6 +452,7 @@ Respond in JSON format:
 
     // Get translation from OpenAI
     const response = await callOpenAIForTranslation(prompt);
+    vLog('OpenAI translation response:', JSON.stringify(response));
     
     // Add to dialog
     dialog.turns.push({
@@ -373,7 +473,7 @@ Respond in JSON format:
     if (response.clarificationNeeded && response.clarificationQuestion) {
       dialog.status = 'active';
       await saveDialog(dialog);
-      
+      vLog('Dialog requires clarification:', response.clarificationQuestion);
       return {
         content: [{
           type: "text" as const,
@@ -408,6 +508,7 @@ To continue this dialog, use the \`translate_content\` tool again with:
     dialog.status = 'completed';
     dialog.finalTranslation = response.translation;
     await saveDialog(dialog);
+    vLog('Dialog completed and saved:', dialog.id);
     
     // Add to translation memory
     const memoryEntry: TranslationMemoryEntry = {
@@ -439,12 +540,15 @@ To continue this dialog, use the \`translate_content\` tool again with:
         memory[existingIndex].targetText = response.translation;
         memory[existingIndex].confidence = response.confidence;
       }
+      vLog('Updated existing translation memory entry:', JSON.stringify(memory[existingIndex]));
     } else {
       // Add new entry
       memory.push(memoryEntry);
+      vLog('Added new translation memory entry:', JSON.stringify(memoryEntry));
     }
     
     await saveTranslationMemory(sourceLanguage, targetLanguage, memory);
+    vLog('Translation memory updated and saved.');
     
     // Return result
     return {
@@ -489,6 +593,7 @@ This is a new translation that has been saved to memory for future reference.
     };
     
   } catch (error: unknown) {
+    vLog('Error in translateContent tool:', error instanceof Error ? error.message : String(error));
     console.error('Error in translateContent tool:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during translation.';
     return {
