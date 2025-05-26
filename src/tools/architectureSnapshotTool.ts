@@ -24,6 +24,19 @@ export async function architectureSnapshot(params: z.infer<typeof architectureSn
   const analyzer = new ArchitectureAnalyzer();
   
   try {
+    // Smart detection: if action is 'create', check if we should suggest 'update' instead
+    if (params.action === 'create') {
+      const detectionResult = await detectExistingSnapshots(params);
+      if (detectionResult.hasExisting) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: detectionResult.message
+          }]
+        };
+      }
+    }
+    
     switch (params.action) {
       case 'create':
         return await createSnapshot(analyzer, params);
@@ -54,6 +67,58 @@ export async function architectureSnapshot(params: z.infer<typeof architectureSn
       }]
     };
   }
+}
+
+async function detectExistingSnapshots(params: z.infer<typeof architectureSnapshotSchema>): Promise<{
+  hasExisting: boolean;
+  message: string;
+}> {
+  const projectPath = params.projectPath || process.cwd();
+  const projectId = params.projectId || path.basename(projectPath);
+  const projectSnapshotDir = path.join(SNAPSHOTS_DIR, projectId);
+  
+  try {
+    // Check if the project snapshot directory exists
+    await fs.access(projectSnapshotDir);
+    
+    // Check for metadata.json (our tool's signature file)
+    const metadataPath = path.join(projectSnapshotDir, 'metadata.json');
+    const metadata = await loadMetadata(metadataPath);
+    
+    if (metadata.snapshots && metadata.snapshots.length > 0) {
+      const latestSnapshot = metadata.snapshots[metadata.snapshots.length - 1];
+      const snapshotDate = new Date(latestSnapshot.timestamp).toLocaleString();
+      
+      return {
+        hasExisting: true,
+        message: `📊 Found existing architecture snapshots for project "${projectId}"
+
+**Latest snapshot:** ${snapshotDate}
+**Snapshot ID:** ${latestSnapshot.id}
+**Total snapshots:** ${metadata.snapshots.length}
+
+It looks like this project already has architecture snapshots created by this tool.
+
+**Recommended action:** Use \`update\` to create a new snapshot and compare changes:
+\`\`\`
+architecture_snapshot action=update projectId=${projectId}
+\`\`\`
+
+If you want to start fresh instead, you can:
+1. Delete existing snapshots: \`rm -rf ${projectSnapshotDir}\`
+2. Then run: \`architecture_snapshot action=create projectId=${projectId}\`
+
+Or view existing snapshots: \`architecture_snapshot action=list projectId=${projectId}\``
+      };
+    }
+  } catch (error) {
+    // Directory doesn't exist or no metadata - this is fine, proceed with create
+  }
+  
+  return {
+    hasExisting: false,
+    message: ''
+  };
 }
 
 async function createSnapshot(analyzer: ArchitectureAnalyzer, params: z.infer<typeof architectureSnapshotSchema>) {

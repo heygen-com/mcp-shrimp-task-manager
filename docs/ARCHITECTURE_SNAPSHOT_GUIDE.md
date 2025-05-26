@@ -30,6 +30,16 @@ To analyze a specific project:
 architecture_snapshot action=create projectPath=/path/to/project
 ```
 
+### Smart Detection
+
+When you use `action=create`, the tool automatically checks if architecture snapshots already exist for your project (created by this tool). If found, it will:
+
+1. Show you information about existing snapshots
+2. Recommend using `action=update` instead to track changes
+3. Provide options to either update or start fresh
+
+This only detects snapshots created by this tool - it won't interfere with other architecture documentation you may have.
+
 ### Options
 
 - **depth**: `shallow` or `deep` (default: deep)

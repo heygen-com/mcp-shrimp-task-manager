@@ -55,6 +55,7 @@ Shrimp Task Manager guides Agents through structured workflows for systematic pr
   - `check_browser_logs` - Fetch console logs from browser tabs (*requires mcp-devtools-bridge*)
   - `list_browser_tabs` - List monitored browser tabs (*requires mcp-devtools-bridge*)
   - `analyze_pr` - Analyze GitHub pull requests for code quality
+  - `architecture_snapshot` - Create comprehensive architecture documentation with smart detection of existing snapshots. See [Architecture Snapshot Guide](docs/ARCHITECTURE_SNAPSHOT_GUIDE.md) for details.
 
 ## 🧭 <a id="usage-guide"></a>Usage Guide
 
