@@ -371,6 +371,7 @@ After configuration, you can use the following tools:
 |                         | `verify_task`        | Verify task completion                           |
 |                         | `complete_task`      | Mark tasks as completed                          |
 | **Code Analysis**       | `analyze_pr`         | Analyze pull requests and generate reports       |
+|                         | `architecture_snapshot` | Create comprehensive architecture documentation |
 | **Debugging**           | `log_data_dir`       | Log the path to the tasks.json file              |
 
 > **Note on Custom Tools (Heygen Fork):** This fork may include additional custom tools not present in the original repository. Currently, it includes:

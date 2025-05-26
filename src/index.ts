@@ -58,6 +58,7 @@ import { projectContext, projectContextSchema } from "./tools/projectContext.js"
 import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debugTools.js";
 import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
 import { analyzePR, analyzePRSchema } from "./tools/prAnalysisTools.js";
+import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architectureSnapshotTool.js";
 
 async function main() {
   try {
@@ -225,6 +226,7 @@ async function main() {
           { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
           { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
+          { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
         ],
       };
     });
@@ -360,6 +362,10 @@ async function main() {
             case "consolidate_translation_memory":
               parsedArgs = await consolidateTranslationMemorySchema.parseAsync(request.params.arguments);
               result = await consolidateTranslationMemory(parsedArgs);
+              break;
+            case "architecture_snapshot":
+              parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
+              result = await architectureSnapshot(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);
