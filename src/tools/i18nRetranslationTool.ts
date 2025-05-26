@@ -108,7 +108,8 @@ async function translateObject(
         sourceLanguage: 'en',
         domain: domain,
         context: `${context}. Key path: ${path.join('.')}${hasInterpolation ? '. Contains interpolation variables that must be preserved.' : ''}`,
-        requestClarification: false
+        requestClarification: false,
+        returnFormat: 'formatted'
       });
       
       // Extract the translated text from the result

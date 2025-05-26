@@ -31,6 +31,7 @@ export const TranslateContentInputSchema = z.object({
   domain: z.string().optional().describe('Domain/category for this translation (e.g., "education", "finance", "ui", "error_messages")'),
   requestClarification: z.boolean().default(false).describe('Whether the secondary agent should request clarification if context is ambiguous'),
   previousDialogId: z.string().optional().describe('ID of previous dialog to continue conversation'),
+  returnFormat: z.enum(['json', 'formatted']).default('json').describe('Return format: "json" for raw JSON response (default for agents), "formatted" for human-readable markdown'),
   // Optionally enable verbose logging for debugging
   verbose: z.boolean().optional().describe('Enable verbose logging for debugging (default: false)')
 });
@@ -319,6 +320,7 @@ export async function translateContent(params: z.infer<typeof TranslateContentIn
       domain, 
       requestClarification,
       previousDialogId,
+      returnFormat,
       verbose
     } = params;
 
@@ -357,7 +359,23 @@ export async function translateContent(params: z.infer<typeof TranslateContentIn
           await saveTranslationMemory(sourceLanguage, targetLanguage, memory);
         }
         
-        // Return cached translation
+        // Return cached translation in requested format
+        if (returnFormat === 'json') {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                translation: exactMatch.targetText,
+                confidence: exactMatch.confidence,
+                source: "cache",
+                usageCount: exactMatch.usageCount + 1,
+                domain: domain || 'general',
+                context: context || null
+              })
+            }]
+          };
+        }
+        
         return {
           content: [{
             type: "text" as const,
@@ -474,6 +492,24 @@ Respond in JSON format:
       dialog.status = 'active';
       await saveDialog(dialog);
       vLog('Dialog requires clarification:', response.clarificationQuestion);
+      
+      if (returnFormat === 'json') {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              dialogId: dialog.id,
+              clarificationNeeded: true,
+              clarificationQuestion: response.clarificationQuestion,
+              currentTranslation: response.translation,
+              confidence: response.confidence,
+              alternatives: response.alternatives || [],
+              explanation: response.explanation
+            })
+          }]
+        };
+      }
+      
       return {
         content: [{
           type: "text" as const,
@@ -550,7 +586,26 @@ To continue this dialog, use the \`translate_content\` tool again with:
     await saveTranslationMemory(sourceLanguage, targetLanguage, memory);
     vLog('Translation memory updated and saved.');
     
-    // Return result
+    // Return result in requested format
+    if (returnFormat === 'json') {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            translation: response.translation,
+            confidence: response.confidence,
+            alternatives: response.alternatives || [],
+            explanation: response.explanation,
+            domain_notes: response.domain_notes,
+            domain: domain || 'general',
+            context: context || null,
+            source: "new_translation"
+          })
+        }]
+      };
+    }
+    
+    // Return formatted result
     return {
       content: [{
         type: "text" as const,
@@ -605,4 +660,4 @@ This is a new translation that has been saved to memory for future reference.
 }
 
 // Export schema for registration
-export { TranslateContentInputSchema as translateContentSchema }; 
+export { TranslateContentInputSchema as translateContentSchema };
