@@ -360,6 +360,8 @@ After configuration, you can use the following tools:
 |                         | `process_thought`    | Step-by-step reasoning for complex problems      |
 | **Solution Assessment** | `reflect_task`       | Reflect and improve solution concepts            |
 | **Project Management**  | `init_project_rules` | Initialize or update project standards and rules |
+|                         | `project`            | Unified project management - create, update, delete, list, open projects |
+|                         | `project_context`    | Project context management - add, search, analyze, export, delete context entries |
 | **Task Management**     | `split_tasks`        | Break tasks into subtasks                        |
 |                         | `list_tasks`         | Display all tasks and status                     |
 |                         | `query_task`         | Search and list tasks                            |

@@ -21,7 +21,8 @@ export const projectContextSchema = z.object({
     "analyze",
     "timeline",
     "export",
-    "summary"
+    "summary",
+    "delete"
   ]).describe("Action to perform"),
   
   projectId: z.string().describe("Project ID"),
@@ -54,6 +55,11 @@ export const projectContextSchema = z.object({
   
   // For timeline
   timelineType: z.enum(["all", "breakthroughs", "decisions", "problems"]).optional().default("all"),
+  
+  // For delete action
+  contextId: z.string().optional().describe("Specific context ID to delete"),
+  deleteQuery: z.string().optional().describe("Query to find contexts to delete"),
+  confirmDelete: z.boolean().optional().default(false).describe("Confirm deletion of multiple contexts"),
 }).describe("Project context management tool");
 
 /**
@@ -101,6 +107,9 @@ async function projectContextImpl(params: z.infer<typeof projectContextSchema>) 
         
       case "summary":
         return await handleSummaryContext(params, project);
+        
+      case "delete":
+        return await handleDeleteContext(params, project);
         
       default:
         return {
@@ -754,6 +763,147 @@ async function handleSummaryContext(params: z.infer<typeof projectContextSchema>
         output.substring(0, 500) + '...'
     }]
   };
+}
+
+// Handle delete context
+async function handleDeleteContext(params: z.infer<typeof projectContextSchema>, project: any) {
+  const projectDir = path.join(PROJECTS_DIR, params.projectId);
+  const projectFile = path.join(projectDir, 'project.json');
+  
+  try {
+    // Read current project data
+    const projectData = JSON.parse(await fs.readFile(projectFile, 'utf-8'));
+    
+    if (!projectData.contexts || projectData.contexts.length === 0) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `❌ No contexts found in project.`
+        }]
+      };
+    }
+    
+    let contextsToDelete: any[] = [];
+    let remainingContexts: any[] = [];
+    
+    if (params.contextId) {
+      // Delete specific context by ID
+      contextsToDelete = projectData.contexts.filter((c: any) => c.id === params.contextId);
+      remainingContexts = projectData.contexts.filter((c: any) => c.id !== params.contextId);
+      
+      if (contextsToDelete.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `❌ Context with ID ${params.contextId} not found.`
+          }]
+        };
+      }
+    } else if (params.deleteQuery) {
+      // Delete contexts matching query
+      const query = params.deleteQuery.toLowerCase();
+      contextsToDelete = projectData.contexts.filter((c: any) => 
+        c.content.toLowerCase().includes(query) ||
+        c.tags?.some((t: string) => t.toLowerCase().includes(query)) ||
+        (c.metadata && JSON.stringify(c.metadata).toLowerCase().includes(query))
+      );
+      remainingContexts = projectData.contexts.filter((c: any) => 
+        !c.content.toLowerCase().includes(query) &&
+        !c.tags?.some((t: string) => t.toLowerCase().includes(query)) &&
+        !(c.metadata && JSON.stringify(c.metadata).toLowerCase().includes(query))
+      );
+      
+      if (contextsToDelete.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `❌ No contexts found matching query: "${params.deleteQuery}"`
+          }]
+        };
+      }
+      
+      // Require confirmation for multiple deletions
+      if (contextsToDelete.length > 1 && !params.confirmDelete) {
+        let preview = `⚠️ Found ${contextsToDelete.length} contexts to delete:\n\n`;
+        for (const ctx of contextsToDelete.slice(0, 5)) {
+          preview += `- **${ctx.type}** (${ctx.id}): ${ctx.content.substring(0, 50)}...\n`;
+        }
+        if (contextsToDelete.length > 5) {
+          preview += `- ... and ${contextsToDelete.length - 5} more\n`;
+        }
+        preview += `\nTo confirm deletion, run again with confirmDelete: true`;
+        
+        return {
+          content: [{
+            type: "text" as const,
+            text: preview
+          }]
+        };
+      }
+    } else {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `❌ Please provide either contextId or deleteQuery parameter.`
+        }]
+      };
+    }
+    
+    // Update project data
+    projectData.contexts = remainingContexts;
+    projectData.updatedAt = new Date().toISOString();
+    
+    // Save updated project
+    await fs.writeFile(projectFile, JSON.stringify(projectData, null, 2));
+    
+    // Delete associated context files
+    for (const ctx of contextsToDelete) {
+      const contextFile = path.join(projectDir, `contexts/${ctx.id}.json`);
+      try {
+        await fs.unlink(contextFile);
+      } catch (error) {
+        // File might not exist, that's okay
+      }
+    }
+    
+    // Generate deletion report
+    let report = `✅ Successfully deleted ${contextsToDelete.length} context(s)!\n\n`;
+    report += `## Deleted Contexts\n\n`;
+    
+    for (const ctx of contextsToDelete) {
+      report += `### ${ctx.type} - ${ctx.id}\n`;
+      report += `**Date:** ${new Date(ctx.createdAt).toISOString().split('T')[0]}\n`;
+      report += `**Content:** ${ctx.content.substring(0, 200)}...\n`;
+      if (ctx.tags && ctx.tags.length > 0) {
+        report += `**Tags:** ${ctx.tags.join(', ')}\n`;
+      }
+      report += `\n---\n\n`;
+    }
+    
+    report += `\n## Summary\n\n`;
+    report += `- **Contexts deleted:** ${contextsToDelete.length}\n`;
+    report += `- **Contexts remaining:** ${remainingContexts.length}\n`;
+    
+    // Save deletion report
+    const reportPath = path.join(projectDir, `deletion-report-${new Date().toISOString().split('T')[0]}.md`);
+    await fs.writeFile(reportPath, report);
+    
+    return {
+      content: [{
+        type: "text" as const,
+        text: report
+      }]
+    };
+    
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    return {
+      content: [{
+        type: "text" as const,
+        text: `❌ Failed to delete context: ${errorMsg}`
+      }]
+    };
+  }
 }
 
 // Export the implementation directly
