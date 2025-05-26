@@ -176,14 +176,15 @@ async function fetchGitHubPR(repoInfo: any): Promise<any> {
     
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      const statusText = error.response?.statusText;
+    if (error instanceof Error && 'response' in error) {
+      const axiosError = error as any;
+      const status = axiosError.response?.status;
+      const statusText = axiosError.response?.statusText;
       
       if (status === 401) {
         throw new Error(`GitHub API authentication failed. Please check your GITHUB_TOKEN is valid.`);
       } else if (status === 403) {
-        const rateLimitRemaining = error.response?.headers['x-ratelimit-remaining'];
+        const rateLimitRemaining = axiosError.response?.headers['x-ratelimit-remaining'];
         if (rateLimitRemaining === '0') {
           throw new Error(`GitHub API rate limit exceeded. Please set a valid GITHUB_TOKEN to increase limits.`);
         }
@@ -192,7 +193,7 @@ async function fetchGitHubPR(repoInfo: any): Promise<any> {
         throw new Error(`Pull request not found. Please check the PR URL is correct and you have access to the repository.`);
       }
       
-      throw new Error(`GitHub API error (${status}): ${statusText || error.message}`);
+      throw new Error(`GitHub API error (${status}): ${statusText || axiosError.message}`);
     }
     throw error;
   }
@@ -217,16 +218,17 @@ async function fetchGitHubDiff(repoInfo: any): Promise<string> {
       responseType: "text", // Important for getting raw text diff
     });
     
-    return response.data;
+    return response.data as string;
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
+    if (error instanceof Error && 'response' in error) {
+      const axiosError = error as any;
+      const status = axiosError.response?.status;
       if (status === 401) {
         throw new Error(`GitHub API authentication failed while fetching diff.`);
       } else if (status === 403) {
         throw new Error(`GitHub API access forbidden while fetching diff.`);
       }
-      throw new Error(`GitHub API error while fetching diff: ${error.response?.statusText || error.message}`);
+      throw new Error(`GitHub API error while fetching diff: ${axiosError.response?.statusText || axiosError.message}`);
     }
     throw error;
   }

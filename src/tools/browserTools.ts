@@ -64,9 +64,9 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
       }
     } catch (error: any) {
       console.error('Error fetching tabs:', error);
-      const message = axios.isAxiosError(error) && error.response?.status === 404
+      const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
         ? `DevTools Bridge server not found at ${SERVER_BASE_URL}/tabs.`
-        : `Error fetching tabs: ${error.message}`;
+        : `Error fetching tabs: ${error instanceof Error ? error.message : String(error)}`;
       return {
         content: [
           {
@@ -170,9 +170,9 @@ ${JSON.stringify(returnedLogs, null, 2)}`,
 
     } catch (error: any) {
       console.error(`Error fetching logs for tab ${targetTabId}:`, error);
-       const message = axios.isAxiosError(error) && error.response?.status === 404
+       const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
         ? `Log endpoint not found for tab ${targetTabId}. Is the server running and the tab ID correct?`
-        : `Error fetching logs for tab ${targetTabId}: ${error.message}`;
+        : `Error fetching logs for tab ${targetTabId}: ${error instanceof Error ? error.message : String(error)}`;
        return {
         content: [
           {
@@ -237,9 +237,9 @@ export const listBrowserTabs: Tool<typeof listBrowserTabsSchema> = {
       };
     } catch (error: any) {
       console.error('Error fetching tabs:', error);
-      const message = axios.isAxiosError(error) && error.response?.status === 404
+      const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
         ? `DevTools Bridge server not found at ${SERVER_BASE_URL}/cdp-tabs.`
-        : `Error fetching tabs: ${error.message}`;
+        : `Error fetching tabs: ${error instanceof Error ? error.message : String(error)}`;
       return {
         content: [
           {

@@ -523,12 +523,15 @@ export async function startTaskAttempt(
   const task = await getTaskById(taskId);
   if (!task) return null;
 
+  const attemptHistory = task.attemptHistory || [];
+  const attemptNumber = attemptHistory.length + 1;
+  
   const newAttempt: TaskAttempt = {
+    attemptNumber: attemptNumber,
     timestamp: new Date(),
     status: "started",
   };
 
-  const attemptHistory = task.attemptHistory || [];
   attemptHistory.push(newAttempt);
 
   return await updateTask(taskId, {

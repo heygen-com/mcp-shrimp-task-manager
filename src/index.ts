@@ -53,6 +53,8 @@ import {
 } from "./tools/taskTools.js";
 import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
 import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
+import { project, projectSchema } from "./tools/unifiedProject.js";
+import { projectContext, projectContextSchema } from "./tools/projectContext.js";
 import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debugTools.js";
 import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
 import { analyzePR, analyzePRSchema } from "./tools/prAnalysisTools.js";
@@ -210,6 +212,8 @@ async function main() {
           { name: "get_task_detail", description: loadPromptFromTemplate("toolsDescription/getTaskDetail.md"), inputSchema: zodToJsonSchema(getTaskDetailSchema) },
           { name: "process_thought", description: loadPromptFromTemplate("toolsDescription/processThought.md"), inputSchema: zodToJsonSchema(processThoughtSchema) },
           { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
+          { name: "project", description: "Unified project management tool - create, update, delete, list, open projects, and generate prompts. Use action parameter to specify operation.", inputSchema: zodToJsonSchema(projectSchema) },
+          { name: "project_context", description: "Project context management - add, search, analyze, export context entries. Essential for capturing learnings, decisions, problems, and solutions.", inputSchema: zodToJsonSchema(projectContextSchema) },
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
@@ -303,6 +307,14 @@ async function main() {
             case "init_project_rules":
               parsedArgs = await initProjectRulesSchema.parseAsync(request.params.arguments || {});
               result = await initProjectRules();
+              break;
+            case "project":
+              parsedArgs = await projectSchema.parseAsync(request.params.arguments);
+              result = await project(parsedArgs);
+              break;
+            case "project_context":
+              parsedArgs = await projectContextSchema.parseAsync(request.params.arguments);
+              result = await projectContext(parsedArgs);
               break;
             case "log_data_dir":
               parsedArgs = await logDataDirSchema.parseAsync(request.params.arguments || {});

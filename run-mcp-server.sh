@@ -1,0 +1,1 @@
+run-mcp.sh
