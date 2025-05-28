@@ -2,6 +2,16 @@
 
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **GitHub PR Context Tool**: New tool to fetch comprehensive GitHub PR context
+  - Fetches PR metadata, changed files, unresolved review comments, and merge blockers
+  - Outputs both structured JSON and human-readable markdown
+  - Supports authentication for private repositories via GITHUB_TOKEN
+  - Provides raw data without recommendations or interpretations
+  - Complements the existing `analyze_pr` tool by focusing on context rather than analysis
+
 ## [1.0.14] - 2025-05-24
 
 ### Added

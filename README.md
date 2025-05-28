@@ -55,6 +55,7 @@ Shrimp Task Manager guides Agents through structured workflows for systematic pr
   - `check_browser_logs` - Fetch console logs from browser tabs (*requires mcp-devtools-bridge*)
   - `list_browser_tabs` - List monitored browser tabs (*requires mcp-devtools-bridge*)
   - `analyze_pr` - Analyze GitHub pull requests for code quality
+  - `github_pr_context` - Fetch comprehensive GitHub PR context including metadata, changed files, unresolved review comments, and merge blockers. See [GitHub PR Context Tool](docs/tools/github-pr-context.md) for details.
   - `architecture_snapshot` - Create comprehensive architecture documentation with smart detection of existing snapshots. See [Architecture Snapshot Guide](docs/ARCHITECTURE_SNAPSHOT_GUIDE.md) for details.
 
 ## 🧭 <a id="usage-guide"></a>Usage Guide
@@ -372,6 +373,7 @@ After configuration, you can use the following tools:
 |                         | `verify_task`        | Verify task completion                           |
 |                         | `complete_task`      | Mark tasks as completed                          |
 | **Code Analysis**       | `analyze_pr`         | Analyze pull requests and generate reports       |
+|                         | `github_pr_context`  | Fetch raw GitHub PR context without analysis     |
 |                         | `architecture_snapshot` | Create comprehensive architecture documentation |
 | **Debugging**           | `log_data_dir`       | Log the path to the tasks.json file              |
 

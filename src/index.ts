@@ -59,6 +59,7 @@ import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/
 import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
 import { analyzePR, analyzePRSchema } from "./tools/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architectureSnapshotTool.js";
+import { githubPRContext, githubPRContextSchema } from "./tools/githubPRContextTool.js";
 
 async function main() {
   try {
@@ -227,6 +228,7 @@ async function main() {
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
           { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
+          { name: "github_pr_context", description: loadPromptFromTemplate("toolsDescription/githubPRContext.md"), inputSchema: zodToJsonSchema(githubPRContextSchema) },
         ],
       };
     });
@@ -366,6 +368,10 @@ async function main() {
             case "architecture_snapshot":
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
               result = await architectureSnapshot(parsedArgs);
+              break;
+            case "github_pr_context":
+              parsedArgs = await githubPRContextSchema.parseAsync(request.params.arguments);
+              result = await githubPRContext(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);
