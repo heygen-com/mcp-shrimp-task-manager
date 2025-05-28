@@ -16,7 +16,7 @@
     "mcp-shrimp-task-manager": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc && copyfiles -u 1 './src/**/*.md' dist && copyfiles -u 1 './src/public/**/*' dist && node scripts/add-shebang.js",
+    "build": "tsc && copyfiles -u 1 \"src/**/*.md\" dist && copyfiles -u 1 \"src/public/**/*\" dist && node scripts/add-shebang.js",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "test": "jest",
