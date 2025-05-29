@@ -1,6 +1,6 @@
 import { z } from "zod";
 import axios from "axios";
-import { extractRepoInfo, GitPlatform } from "../utils/gitUtils.js";
+import { extractRepoInfo, GitPlatform } from "../../utils/gitUtils.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";

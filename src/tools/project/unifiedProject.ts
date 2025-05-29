@@ -10,8 +10,8 @@ import {
   getProjectContexts,
   getProjectInsights,
   getProjectTasks,
-} from "../models/projectModel.js";
-import { Project, ProjectContextType, ProjectStatus, TaskStatus } from "../types/index.js";
+} from "../../models/projectModel.js";
+import { Project, ProjectContextType, ProjectStatus, TaskStatus } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";

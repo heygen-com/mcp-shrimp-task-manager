@@ -14,11 +14,11 @@ import path from "path";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import { fileURLToPath } from "url";
-import { consultExpert, ConsultExpertInputSchema } from './tools/consultExpertTool.js';
+import { consultExpert, ConsultExpertInputSchema } from './tools/consult/consultExpertTool.js';
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
-import { translateContent, translateContentSchema } from './tools/translationTool.js';
-import { retranslateI18n, retranslateI18nSchema } from './tools/i18nRetranslationTool.js';
-import { consolidateTranslationMemory, consolidateTranslationMemorySchema } from './tools/consolidateTranslationMemory.js';
+import { translateContent, translateContentSchema } from './tools/translation/translationTool.js';
+import { retranslateI18n, retranslateI18nSchema } from './tools/translation/i18nRetranslationTool.js';
+import { consolidateTranslationMemory, consolidateTranslationMemorySchema } from './tools/translation/consolidateTranslationMemory.js';
 import {
   planTask,
   planTaskSchema,
@@ -51,15 +51,15 @@ import {
   checkAgentStatus,
   checkAgentStatusSchema
 } from "./tools/taskTools.js";
-import { processThought, processThoughtSchema } from "./tools/thoughtChainTools.js";
-import { initProjectRules, initProjectRulesSchema } from "./tools/projectTools.js";
-import { project, projectSchema } from "./tools/unifiedProject.js";
-import { projectContext, projectContextSchema } from "./tools/projectContext.js";
-import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debugTools.js";
-import { checkpoint, checkpointSchema } from "./tools/checkpointTool.js";
-import { analyzePR, analyzePRSchema } from "./tools/prAnalysisTools.js";
-import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architectureSnapshotTool.js";
-import { githubPRContext, githubPRContextSchema } from "./tools/githubPRContextTool.js";
+import { processThought, processThoughtSchema } from "./tools/chain/thoughtChainTools.js";
+import { initProjectRules, initProjectRulesSchema } from "./tools/project/projectTools.js";
+import { project, projectSchema } from "./tools/project/unifiedProject.js";
+import { projectContext, projectContextSchema } from "./tools/project/projectContext.js";
+import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debug/debugTools.js";
+import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.js";
+import { analyzePR, analyzePRSchema } from "./tools/pr/prAnalysisTools.js";
+import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
+import { githubPRContext, githubPRContextSchema } from "./tools/pr/githubPRContextTool.js";
 
 async function main() {
   try {

@@ -4,8 +4,8 @@ import {
   getProjectContexts,
   getProjectInsights,
   getProjectById,
-} from "../models/projectModel.js";
-import { ProjectContextType } from "../types/index.js";
+} from "../../models/projectModel.js";
+import { ProjectContextType } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
 

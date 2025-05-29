@@ -1,6 +1,6 @@
 import { z } from "zod";
 import axios from "axios";
-import { extractRepoInfo, GitPlatform } from "../utils/gitUtils.js";
+import { extractRepoInfo, GitPlatform } from "../../utils/gitUtils.js";
 
 // Schema for the GitHub PR Context tool
 export const githubPRContextSchema = z.object({
@@ -24,15 +24,6 @@ interface PRMetadata {
     username: string;
     profile_url: string;
   };
-}
-
-interface ChangedFile {
-  filename: string;
-  status: string;
-  additions: number;
-  deletions: number;
-  changes: number;
-  patch?: string;
 }
 
 interface ReviewComment {
@@ -122,11 +113,13 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
 
     // Fetch PR data
     const prApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/pulls/${repoInfo.prNumber}`;
-    const prData = await githubApiRequest(prApiUrl);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prData = await githubApiRequest(prApiUrl) as any;
 
     // Fetch PR files
     const filesApiUrl = `${prApiUrl}/files`;
-    const filesData = await githubApiRequest(filesApiUrl);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const filesData = (await githubApiRequest(filesApiUrl)) as any[];
 
     // Fetch review comments
     const reviewCommentsApiUrl = `${prApiUrl}/comments`;
@@ -152,9 +145,9 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
     const contextData = processGitHubData(
       prData,
       filesData,
-      reviewCommentsData,
-      issueCommentsData,
-      reviewsData,
+      reviewCommentsData as any[],
+      issueCommentsData as any[],
+      reviewsData as any[],
       statusData,
       checkRunsData,
       prUrl
@@ -191,6 +184,7 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
 }
 
 // Process GitHub API data into our structured format
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processGitHubData(
   prData: any,
   filesData: any[],
@@ -261,6 +255,7 @@ function processGitHubData(
 }
 
 // Process review comments into threads
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processReviewThreads(reviewCommentsData: any[]): ReviewThread[] {
   const threadsMap = new Map<string, ReviewThread>();
 
@@ -296,6 +291,7 @@ function processReviewThreads(reviewCommentsData: any[]): ReviewThread[] {
 }
 
 // Process required checks
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processRequiredChecks(statusData: any, checkRunsData: any): RequiredCheck[] {
   const checks: RequiredCheck[] = [];
 
@@ -367,6 +363,7 @@ function mapCheckRunStatus(status: string, conclusion: string | null): "success"
 }
 
 // Process reviewer statuses
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processReviewerStatuses(reviewsData: any[]): ReviewerStatus[] {
   // Temporary interface for storing reviewer data with timestamp
   interface ReviewerWithTimestamp extends ReviewerStatus {

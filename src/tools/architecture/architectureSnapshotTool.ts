@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs/promises';
-import { ArchitectureAnalyzer } from './architectureSnapshot/architectureAnalyzer.js';
-import { ProjectSnapshot } from '../types/architectureSnapshot.js';
+import { ArchitectureAnalyzer } from '../../tools/architectureSnapshot/architectureAnalyzer.js';
+import { ProjectSnapshot } from '../../types/architectureSnapshot.js';
 
 // Get DATA_DIR from environment
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');

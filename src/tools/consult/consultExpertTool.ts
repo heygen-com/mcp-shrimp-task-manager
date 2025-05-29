@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import OpenAI from 'openai';
-import { getTaskById, updateTask } from '../models/taskModel.js'; // <-- Import task model functions
-import { ExpertSuggestion, TaskStatus, Task } from '../types/index.js'; // <-- Import ExpertSuggestion type
-import { loadPromptFromTemplate, generatePrompt } from '../prompts/loader.js'; // Corrected import path
+import { getTaskById, updateTask } from '../../models/taskModel.js'; // <-- Import task model functions
+import { ExpertSuggestion, TaskStatus, Task } from '../../types/index.js'; // <-- Import ExpertSuggestion type
+import { loadPromptFromTemplate, generatePrompt } from '../../prompts/loader.js'; // Corrected import path
 
 // Define the input schema for the tool using Zod
 export const ConsultExpertInputSchema = z.object({
