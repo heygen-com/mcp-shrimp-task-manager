@@ -5,7 +5,7 @@ import {
   getProjectInsights,
   getProjectById,
 } from "../../models/projectModel.js";
-import { ProjectContextType } from "../../types/index.js";
+import { Project, ProjectContext, ProjectInsight, ProjectContextType } from "../../types/index.js";
 import fs from "fs/promises";
 import path from "path";
 
@@ -31,7 +31,7 @@ export const projectContextSchema = z.object({
   contextType: z.enum(["learning", "decision", "problem", "solution", "reference", "note", "breakthrough"]).optional(),
   content: z.string().optional().describe("Context content"),
   tags: z.array(z.string()).optional().describe("Tags for the context"),
-  metadata: z.record(z.any()).optional().describe("Additional metadata"),
+  metadata: z.record(z.unknown()).optional().describe("Additional metadata"),
   
   // For search action
   query: z.string().optional().describe("Search query"),
@@ -62,12 +62,22 @@ export const projectContextSchema = z.object({
   confirmDelete: z.boolean().optional().default(false).describe("Confirm deletion of multiple contexts"),
 }).describe("Project context management tool");
 
+// Type guard for ProjectContext
+function isProjectContext(item: ProjectContext | ProjectInsight): item is ProjectContext {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    'type' in item &&
+    typeof (item as unknown as { type: unknown }).type === 'string' &&
+    'content' in item &&
+    typeof (item as unknown as { content: unknown }).content === 'string'
+  );
+}
+
 /**
  * Project context management tool implementation
  */
 async function projectContextImpl(params: z.infer<typeof projectContextSchema>) {
-  const startTime = Date.now();
-  
   try {
     // Debug log the environment
     if (process.env.MCP_DEBUG_LOGGING === "true") {
@@ -106,10 +116,10 @@ async function projectContextImpl(params: z.infer<typeof projectContextSchema>) 
         return await handleExportContext(params, project);
         
       case "summary":
-        return await handleSummaryContext(params, project);
+        return { content: [{ type: "text" as const, text: "❌ Summary action not implemented in this file." }] };
         
       case "delete":
-        return await handleDeleteContext(params, project);
+        return { content: [{ type: "text" as const, text: "❌ Delete action not implemented in this file." }] };
         
       default:
         return {
@@ -182,7 +192,7 @@ async function handleAddContext(params: z.infer<typeof projectContextSchema>) {
 }
 
 // Handle search context
-async function handleSearchContext(params: z.infer<typeof projectContextSchema>, project: any) {
+async function handleSearchContext(params: z.infer<typeof projectContextSchema>, project: Project) {
   const contexts = await getProjectContexts(params.projectId);
   const insights = await getProjectInsights(params.projectId);
   
@@ -199,7 +209,7 @@ async function handleSearchContext(params: z.infer<typeof projectContextSchema>,
   
   // Filter by type if specified
   let filtered = params.contextTypes 
-    ? allContexts.filter(c => params.contextTypes!.includes(c.type as any))
+    ? allContexts.filter(c => params.contextTypes!.includes(c.type as ProjectContextType))
     : allContexts;
   
   // Search by query if specified
@@ -236,16 +246,18 @@ async function handleSearchContext(params: z.infer<typeof projectContextSchema>,
     if (!acc[ctx.type]) acc[ctx.type] = [];
     acc[ctx.type].push(ctx);
     return acc;
-  }, {} as Record<string, typeof filtered>);
+  }, {} as Record<string, (ProjectContext | ProjectInsight)[]>);
   
   for (const [type, contexts] of Object.entries(grouped)) {
     output += `## ${type.charAt(0).toUpperCase() + type.slice(1)}s (${contexts.length})\n\n`;
     
     for (const ctx of contexts) {
       output += `### ${new Date(ctx.createdAt).toISOString().split('T')[0]} - ${ctx.id}\n\n`;
-      output += ctx.content + '\n\n';
-      if (ctx.tags && ctx.tags.length > 0) {
-        output += `**Tags:** ${ctx.tags.join(', ')}\n\n`;
+      if (isProjectContext(ctx)) {
+        output += ctx.content + '\n\n';
+        if (ctx.tags && ctx.tags.length > 0) {
+          output += `**Tags:** ${ctx.tags.join(', ')}\n\n`;
+        }
       }
       output += '---\n\n';
     }
@@ -267,7 +279,7 @@ async function handleSearchContext(params: z.infer<typeof projectContextSchema>,
 }
 
 // Handle analyze context
-async function handleAnalyzeContext(params: z.infer<typeof projectContextSchema>, project: any) {
+async function handleAnalyzeContext(params: z.infer<typeof projectContextSchema>, project: Project) {
   const contexts = await getProjectContexts(params.projectId);
   const insights = await getProjectInsights(params.projectId);
   
@@ -289,7 +301,7 @@ async function handleAnalyzeContext(params: z.infer<typeof projectContextSchema>
       break;
       
     case "knowledge_graph":
-      output += await generateKnowledgeGraph(contexts, insights);
+      output += await generateKnowledgeGraph(contexts);
       break;
       
     default:
@@ -312,7 +324,7 @@ async function handleAnalyzeContext(params: z.infer<typeof projectContextSchema>
 }
 
 // Analyze problem-solution pairs
-async function analyzeProblemSolutionPairs(contexts: any[]) {
+async function analyzeProblemSolutionPairs(contexts: ProjectContext[]) {
   const problems = contexts.filter(c => c.type === 'problem');
   const solutions = contexts.filter(c => c.type === 'solution');
   
@@ -364,7 +376,7 @@ async function analyzeProblemSolutionPairs(contexts: any[]) {
 }
 
 // Analyze decisions
-async function analyzeDecisions(contexts: any[]) {
+async function analyzeDecisions(contexts: ProjectContext[]) {
   const decisions = contexts.filter(c => c.type === 'decision');
   
   let output = `## Decision Log\n\n`;
@@ -405,7 +417,7 @@ async function analyzeDecisions(contexts: any[]) {
 }
 
 // Analyze patterns
-async function analyzePatterns(contexts: any[], insights: any[]) {
+async function analyzePatterns(contexts: ProjectContext[], insights: ProjectInsight[]) {
   let output = `## Pattern Analysis\n\n`;
   
   // Tag frequency
@@ -427,13 +439,17 @@ async function analyzePatterns(contexts: any[], insights: any[]) {
   // Context type distribution
   output += `\n### Context Type Distribution\n\n`;
   const typeCounts = contexts.reduce((acc, c) => {
-    acc[c.type] = (acc[c.type] || 0) + 1;
+    if (isProjectContext(c)) {
+      acc[c.type] = (acc[c.type] || 0) + 1;
+    }
     return acc;
   }, {} as Record<string, number>);
   
   const typeEntries = Object.entries(typeCounts) as [string, number][];
   typeEntries.forEach(([type, count]) => {
-    const percentage = ((count / contexts.length) * 100).toFixed(1);
+    // Only count ProjectContext items for percentage
+    const total = contexts.filter(isProjectContext).length;
+    const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
     output += `- **${type}**: ${count} (${percentage}%)\n`;
   });
   
@@ -470,7 +486,7 @@ async function analyzePatterns(contexts: any[], insights: any[]) {
 }
 
 // Generate knowledge graph
-async function generateKnowledgeGraph(contexts: any[], insights: any[]) {
+async function generateKnowledgeGraph(contexts: ProjectContext[]) {
   let output = `## Knowledge Graph\n\n`;
   output += `\`\`\`mermaid\ngraph TD\n`;
   
@@ -532,11 +548,11 @@ async function generateKnowledgeGraph(contexts: any[], insights: any[]) {
 }
 
 // Handle timeline
-async function handleTimelineContext(params: z.infer<typeof projectContextSchema>, project: any) {
+async function handleTimelineContext(params: z.infer<typeof projectContextSchema>, project: Project) {
   const contexts = await getProjectContexts(params.projectId);
   const insights = await getProjectInsights(params.projectId);
   
-  let allItems: any[] = [...contexts];
+  let allItems: (ProjectContext | ProjectInsight)[] = [...contexts];
   if (params.timelineType === 'all' || params.timelineType === 'breakthroughs') {
     allItems.push(...insights.map(i => ({
       ...i,
@@ -548,6 +564,7 @@ async function handleTimelineContext(params: z.infer<typeof projectContextSchema
   // Filter by type
   if (params.timelineType !== 'all') {
     allItems = allItems.filter(item => {
+      if (!isProjectContext(item)) return false;
       if (params.timelineType === 'breakthroughs') return item.type === 'breakthrough';
       if (params.timelineType === 'decisions') return item.type === 'decision';
       if (params.timelineType === 'problems') return item.type === 'problem';
@@ -568,9 +585,9 @@ async function handleTimelineContext(params: z.infer<typeof projectContextSchema
     if (!acc[month]) acc[month] = [];
     acc[month].push(item);
     return acc;
-  }, {} as Record<string, typeof allItems>);
+  }, {} as Record<string, (ProjectContext | ProjectInsight)[]>);
   
-  const groupedEntries = Object.entries(grouped) as [string, typeof allItems][];
+  const groupedEntries = Object.entries(grouped) as [string, (ProjectContext | ProjectInsight)[]][];
   for (const [month, items] of groupedEntries) {
     output += `## ${month}\n\n`;
     
@@ -585,16 +602,15 @@ async function handleTimelineContext(params: z.infer<typeof projectContextSchema
         reference: '📚',
         note: '📝'
       };
-      const icon = iconMap[item.type] || '⚪';
-      
-      output += `### ${date} ${icon} ${item.type.toUpperCase()}\n\n`;
-      output += item.content + '\n\n';
-      
-      if (item.tags && item.tags.length > 0) {
-        output += `**Tags:** ${item.tags.join(', ')}\n\n`;
+      if (isProjectContext(item)) {
+        const icon = iconMap[item.type] || '⚪';
+        output += `### ${date} ${icon} ${item.type.toUpperCase()}\n\n`;
+        output += item.content + '\n\n';
+        if (item.tags && item.tags.length > 0) {
+          output += `**Tags:** ${item.tags.join(', ')}\n\n`;
+        }
+        output += '---\n\n';
       }
-      
-      output += '---\n\n';
     }
   }
   
@@ -614,25 +630,25 @@ async function handleTimelineContext(params: z.infer<typeof projectContextSchema
 }
 
 // Handle export
-async function handleExportContext(params: z.infer<typeof projectContextSchema>, project: any) {
+async function handleExportContext(params: z.infer<typeof projectContextSchema>, project: Project) {
   const contexts = await getProjectContexts(params.projectId);
   const insights = await getProjectInsights(params.projectId);
   
   let filtered = [...contexts];
   if (params.contextTypes) {
-    filtered = filtered.filter(c => params.contextTypes!.includes(c.type as any));
+    filtered = filtered.filter(c => params.contextTypes!.includes(c.type as ProjectContextType));
   }
   
   const filename = params.outputFile || `context-export-${new Date().toISOString().split('T')[0]}.${params.format}`;
   const projectDir = path.join(PROJECTS_DIR, params.projectId);
   const outputPath = path.join(projectDir, filename);
   
+  let csvOutput = 'ID,Type,Date,Content,Tags\n';
   switch (params.format) {
-    case 'markdown':
+    case 'markdown': {
       let mdOutput = `# ${project.name} - Context Export\n\n`;
       mdOutput += `**Exported:** ${new Date().toISOString()}\n`;
       mdOutput += `**Total Contexts:** ${filtered.length}\n\n`;
-      
       for (const ctx of filtered) {
         mdOutput += `## ${ctx.type.toUpperCase()} - ${new Date(ctx.createdAt).toISOString()}\n\n`;
         mdOutput += ctx.content + '\n\n';
@@ -641,16 +657,14 @@ async function handleExportContext(params: z.infer<typeof projectContextSchema>,
         }
         mdOutput += '---\n\n';
       }
-      
       await fs.writeFile(outputPath, mdOutput);
       break;
-      
-    case 'json':
+    }
+    case 'json': {
       await fs.writeFile(outputPath, JSON.stringify({ project, contexts: filtered, insights }, null, 2));
       break;
-      
-    case 'csv':
-      let csvOutput = 'ID,Type,Date,Content,Tags\n';
+    }
+    case 'csv': {
       for (const ctx of filtered) {
         const content = ctx.content.replace(/"/g, '""').replace(/\n/g, ' ');
         const tags = ctx.tags?.join(';') || '';
@@ -658,8 +672,9 @@ async function handleExportContext(params: z.infer<typeof projectContextSchema>,
       }
       await fs.writeFile(outputPath, csvOutput);
       break;
+    }
   }
-  
+
   return {
     content: [{
       type: "text" as const,
@@ -671,240 +686,5 @@ async function handleExportContext(params: z.infer<typeof projectContextSchema>,
   };
 }
 
-// Handle summary
-async function handleSummaryContext(params: z.infer<typeof projectContextSchema>, project: any) {
-  const contexts = await getProjectContexts(params.projectId);
-  const insights = await getProjectInsights(params.projectId);
-  
-  let output = `# ${project.name} - Context Summary\n\n`;
-  output += `**Generated:** ${new Date().toISOString()}\n\n`;
-  
-  // Overview stats
-  output += `## Overview\n\n`;
-  output += `- **Total Contexts:** ${contexts.length}\n`;
-  output += `- **Total Insights:** ${insights.length}\n`;
-  output += `- **Date Range:** ${contexts.length > 0 ? `${new Date(contexts[contexts.length - 1].createdAt).toISOString().split('T')[0]} to ${new Date(contexts[0].createdAt).toISOString().split('T')[0]}` : 'N/A'}\n\n`;
-  
-  // Context breakdown
-  output += `## Context Breakdown\n\n`;
-  const typeCounts = contexts.reduce((acc, c) => {
-    acc[c.type] = (acc[c.type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-  
-  Object.entries(typeCounts).forEach(([type, count]) => {
-    output += `- **${type}**: ${count}\n`;
-  });
-  
-  // Recent highlights
-  output += `\n## Recent Highlights\n\n`;
-  
-  // Recent breakthroughs
-  const recentBreakthroughs = insights.slice(0, 3);
-  if (recentBreakthroughs.length > 0) {
-    output += `### Recent Breakthroughs\n\n`;
-    for (const insight of recentBreakthroughs) {
-      output += `- **${insight.title}** (${insight.impact} impact)\n`;
-      output += `  ${insight.description.substring(0, 100)}...\n\n`;
-    }
-  }
-  
-  // Recent problems
-  const recentProblems = contexts.filter(c => c.type === 'problem').slice(0, 3);
-  if (recentProblems.length > 0) {
-    output += `### Recent Problems\n\n`;
-    for (const problem of recentProblems) {
-      output += `- ${problem.content.substring(0, 100)}...\n`;
-    }
-    output += '\n';
-  }
-  
-  // Recent decisions
-  const recentDecisions = contexts.filter(c => c.type === 'decision').slice(0, 3);
-  if (recentDecisions.length > 0) {
-    output += `### Recent Decisions\n\n`;
-    for (const decision of recentDecisions) {
-      output += `- ${decision.content.substring(0, 100)}...\n`;
-    }
-    output += '\n';
-  }
-  
-  // Tag cloud
-  const allTags: string[] = [];
-  contexts.forEach(c => {
-    if (c.tags) allTags.push(...c.tags);
-  });
-  
-  if (allTags.length > 0) {
-    output += `## Top Tags\n\n`;
-    const tagCounts = allTags.reduce((acc, tag) => {
-      acc[tag] = (acc[tag] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    Object.entries(tagCounts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .forEach(([tag, count]) => {
-        output += `- **${tag}**: ${count} uses\n`;
-      });
-  }
-  
-  // Save to file
-  const projectDir = path.join(PROJECTS_DIR, params.projectId);
-  const outputPath = path.join(projectDir, 'context-summary.md');
-  await fs.writeFile(outputPath, output);
-  
-  return {
-    content: [{
-      type: "text" as const,
-      text: `✅ Summary generated!\n\n` +
-        `Results saved to: ${outputPath}\n\n` +
-        output.substring(0, 500) + '...'
-    }]
-  };
-}
-
-// Handle delete context
-async function handleDeleteContext(params: z.infer<typeof projectContextSchema>, project: any) {
-  const projectDir = path.join(PROJECTS_DIR, params.projectId);
-  const projectFile = path.join(projectDir, 'project.json');
-  
-  try {
-    // Read current project data
-    const projectData = JSON.parse(await fs.readFile(projectFile, 'utf-8'));
-    
-    if (!projectData.contexts || projectData.contexts.length === 0) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `❌ No contexts found in project.`
-        }]
-      };
-    }
-    
-    let contextsToDelete: any[] = [];
-    let remainingContexts: any[] = [];
-    
-    if (params.contextId) {
-      // Delete specific context by ID
-      contextsToDelete = projectData.contexts.filter((c: any) => c.id === params.contextId);
-      remainingContexts = projectData.contexts.filter((c: any) => c.id !== params.contextId);
-      
-      if (contextsToDelete.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `❌ Context with ID ${params.contextId} not found.`
-          }]
-        };
-      }
-    } else if (params.deleteQuery) {
-      // Delete contexts matching query
-      const query = params.deleteQuery.toLowerCase();
-      contextsToDelete = projectData.contexts.filter((c: any) => 
-        c.content.toLowerCase().includes(query) ||
-        c.tags?.some((t: string) => t.toLowerCase().includes(query)) ||
-        (c.metadata && JSON.stringify(c.metadata).toLowerCase().includes(query))
-      );
-      remainingContexts = projectData.contexts.filter((c: any) => 
-        !c.content.toLowerCase().includes(query) &&
-        !c.tags?.some((t: string) => t.toLowerCase().includes(query)) &&
-        !(c.metadata && JSON.stringify(c.metadata).toLowerCase().includes(query))
-      );
-      
-      if (contextsToDelete.length === 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `❌ No contexts found matching query: "${params.deleteQuery}"`
-          }]
-        };
-      }
-      
-      // Require confirmation for multiple deletions
-      if (contextsToDelete.length > 1 && !params.confirmDelete) {
-        let preview = `⚠️ Found ${contextsToDelete.length} contexts to delete:\n\n`;
-        for (const ctx of contextsToDelete.slice(0, 5)) {
-          preview += `- **${ctx.type}** (${ctx.id}): ${ctx.content.substring(0, 50)}...\n`;
-        }
-        if (contextsToDelete.length > 5) {
-          preview += `- ... and ${contextsToDelete.length - 5} more\n`;
-        }
-        preview += `\nTo confirm deletion, run again with confirmDelete: true`;
-        
-        return {
-          content: [{
-            type: "text" as const,
-            text: preview
-          }]
-        };
-      }
-    } else {
-      return {
-        content: [{
-          type: "text" as const,
-          text: `❌ Please provide either contextId or deleteQuery parameter.`
-        }]
-      };
-    }
-    
-    // Update project data
-    projectData.contexts = remainingContexts;
-    projectData.updatedAt = new Date().toISOString();
-    
-    // Save updated project
-    await fs.writeFile(projectFile, JSON.stringify(projectData, null, 2));
-    
-    // Delete associated context files
-    for (const ctx of contextsToDelete) {
-      const contextFile = path.join(projectDir, `contexts/${ctx.id}.json`);
-      try {
-        await fs.unlink(contextFile);
-      } catch (error) {
-        // File might not exist, that's okay
-      }
-    }
-    
-    // Generate deletion report
-    let report = `✅ Successfully deleted ${contextsToDelete.length} context(s)!\n\n`;
-    report += `## Deleted Contexts\n\n`;
-    
-    for (const ctx of contextsToDelete) {
-      report += `### ${ctx.type} - ${ctx.id}\n`;
-      report += `**Date:** ${new Date(ctx.createdAt).toISOString().split('T')[0]}\n`;
-      report += `**Content:** ${ctx.content.substring(0, 200)}...\n`;
-      if (ctx.tags && ctx.tags.length > 0) {
-        report += `**Tags:** ${ctx.tags.join(', ')}\n`;
-      }
-      report += `\n---\n\n`;
-    }
-    
-    report += `\n## Summary\n\n`;
-    report += `- **Contexts deleted:** ${contextsToDelete.length}\n`;
-    report += `- **Contexts remaining:** ${remainingContexts.length}\n`;
-    
-    // Save deletion report
-    const reportPath = path.join(projectDir, `deletion-report-${new Date().toISOString().split('T')[0]}.md`);
-    await fs.writeFile(reportPath, report);
-    
-    return {
-      content: [{
-        type: "text" as const,
-        text: report
-      }]
-    };
-    
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : "Unknown error";
-    return {
-      content: [{
-        type: "text" as const,
-        text: `❌ Failed to delete context: ${errorMsg}`
-      }]
-    };
-  }
-}
-
 // Export the implementation directly
-export const projectContext = projectContextImpl; 
+export const projectContext = projectContextImpl;

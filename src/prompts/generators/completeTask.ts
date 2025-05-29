@@ -31,7 +31,7 @@ export function getCompleteTaskPrompt(
   const indexTemplate = loadPromptFromTemplate("completeTask/index.md");
 
   // 開始構建基本 prompt
-  let prompt = generatePrompt(indexTemplate, {
+  const prompt = generatePrompt(indexTemplate, {
     name: task.name,
     id: task.id,
     completionTime: completionTime,

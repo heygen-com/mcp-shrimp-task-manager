@@ -48,20 +48,21 @@ export class MetadataCollector {
     const packageJsonPath = path.join(projectPath, 'package.json');
     const packageJson = await this.readJsonFile(packageJsonPath);
     
-    if (packageJson) {
-      metadata.name = packageJson.name || metadata.name;
-      metadata.version = packageJson.version;
-      metadata.description = packageJson.description;
-      metadata.repository = this.extractRepository(packageJson.repository);
-      metadata.author = this.extractAuthor(packageJson.author);
-      metadata.license = packageJson.license;
+    if (typeof packageJson === 'object' && packageJson !== null) {
+      const pkg = packageJson as { [key: string]: unknown };
+      if (typeof pkg.name === 'string') metadata.name = pkg.name;
+      if (typeof pkg.version === 'string') metadata.version = pkg.version;
+      if (typeof pkg.description === 'string') metadata.description = pkg.description;
+      metadata.repository = this.extractRepository(pkg.repository);
+      metadata.author = this.extractAuthor(pkg.author);
+      if (typeof pkg.license === 'string') metadata.license = pkg.license;
       metadata.packageManager = await this.detectPackageManager(projectPath);
       
       // Detect frameworks
-      metadata.frameworks = this.detectFrameworks(packageJson);
+      metadata.frameworks = this.detectFrameworks(pkg);
       
       // Detect build tools
-      metadata.buildTools = await this.detectBuildTools(projectPath, packageJson);
+      metadata.buildTools = await this.detectBuildTools(projectPath, pkg);
     }
 
     // Detect languages
@@ -74,24 +75,28 @@ export class MetadataCollector {
     return metadata;
   }
 
-  private async readJsonFile(filePath: string): Promise<any> {
+  private async readJsonFile(filePath: string): Promise<unknown> {
     try {
       const content = await fs.readFile(filePath, 'utf-8');
       return JSON.parse(content);
-    } catch (error) {
+    } catch {
       return null;
     }
   }
 
-  private extractRepository(repo: any): string | undefined {
+  private extractRepository(repo: unknown): string | undefined {
     if (typeof repo === 'string') return repo;
-    if (repo?.url) return repo.url.replace(/^git\+/, '').replace(/\.git$/, '');
+    if (typeof repo === 'object' && repo !== null && 'url' in repo && typeof (repo as { url: unknown }).url === 'string') {
+      return ((repo as { url: string }).url).replace(/^git\+/, '').replace(/\.git$/, '');
+    }
     return undefined;
   }
 
-  private extractAuthor(author: any): string | undefined {
+  private extractAuthor(author: unknown): string | undefined {
     if (typeof author === 'string') return author;
-    if (author?.name) return author.name;
+    if (typeof author === 'object' && author !== null && 'name' in author && typeof (author as { name: unknown }).name === 'string') {
+      return (author as { name: string }).name;
+    }
     return undefined;
   }
 
@@ -115,31 +120,39 @@ export class MetadataCollector {
     return 'npm'; // Default
   }
 
-  private detectFrameworks(packageJson: any): FrameworkInfo[] {
+  private detectFrameworks(packageJson: unknown): FrameworkInfo[] {
     const frameworks: FrameworkInfo[] = [];
-    const allDeps = {
-      ...packageJson.dependencies,
-      ...packageJson.devDependencies
-    };
-
-    for (const [name, config] of Object.entries(FRAMEWORK_PATTERNS)) {
-      for (const pattern of config.patterns) {
-        if (allDeps[pattern]) {
-          frameworks.push({
-            name,
-            version: allDeps[pattern],
-            type: config.type
-          });
-          break;
+    if (typeof packageJson === 'object' && packageJson !== null) {
+      const pkg = packageJson as { [key: string]: unknown };
+      const allDeps = {
+        ...(typeof pkg.dependencies === 'object' && pkg.dependencies !== null ? pkg.dependencies : {}),
+        ...(typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null ? pkg.devDependencies : {})
+      };
+      if (typeof allDeps === 'object' && allDeps !== null) {
+        for (const [name, config] of Object.entries(FRAMEWORK_PATTERNS)) {
+          for (const pattern of config.patterns) {
+            if (Object.prototype.hasOwnProperty.call(allDeps, pattern) && typeof (allDeps as Record<string, unknown>)[pattern] === 'string') {
+              frameworks.push({
+                name,
+                version: (allDeps as Record<string, string>)[pattern],
+                type: config.type
+              });
+              break;
+            }
+          }
         }
       }
     }
-
     return frameworks;
   }
 
-  private async detectBuildTools(projectPath: string, packageJson: any): Promise<BuildTool[]> {
+  private async detectBuildTools(projectPath: string, packageJson: unknown): Promise<BuildTool[]> {
     const buildTools: BuildTool[] = [];
+    let scripts: unknown = undefined;
+    if (typeof packageJson === 'object' && packageJson !== null) {
+      const pkg = packageJson as { [key: string]: unknown };
+      scripts = pkg.scripts;
+    }
 
     // Check for common build tool config files
     const configChecks = [
@@ -159,7 +172,7 @@ export class MetadataCollector {
         buildTools.push({
           name: check.name,
           configFile: check.file,
-          scripts: check.name === 'typescript' || check.name === 'babel' ? undefined : packageJson.scripts
+          scripts: check.name === 'typescript' || check.name === 'babel' ? undefined : scripts as Record<string, string> | undefined
         });
       } catch {
         // File doesn't exist
@@ -167,11 +180,11 @@ export class MetadataCollector {
     }
 
     // Add npm scripts as a build tool if present
-    if (packageJson.scripts && Object.keys(packageJson.scripts).length > 0) {
+    if (scripts && Object.keys(scripts).length > 0) {
       buildTools.push({
         name: 'npm-scripts',
         configFile: 'package.json',
-        scripts: packageJson.scripts
+        scripts: scripts as Record<string, string>
       });
     }
 
@@ -179,35 +192,16 @@ export class MetadataCollector {
   }
 
   private async detectLanguages(projectPath: string): Promise<LanguageInfo[]> {
-    const languages: Map<string, { fileCount: number; lineCount: number }> = new Map();
-    
     // This is a simplified version - in a real implementation,
     // we would recursively scan the project and count files/lines
-    const languageExtensions: Record<string, string> = {
-      '.js': 'JavaScript',
-      '.jsx': 'JavaScript',
-      '.ts': 'TypeScript',
-      '.tsx': 'TypeScript',
-      '.py': 'Python',
-      '.java': 'Java',
-      '.go': 'Go',
-      '.rb': 'Ruby',
-      '.php': 'PHP',
-      '.cs': 'C#',
-      '.cpp': 'C++',
-      '.c': 'C',
-      '.rs': 'Rust',
-      '.swift': 'Swift',
-      '.kt': 'Kotlin'
-    };
 
     // For now, we'll do a simple check for common files
     // In a full implementation, this would scan the entire project
     const hasTypeScript = await this.fileExists(projectPath, 'tsconfig.json');
     const hasJavaScript = await this.fileExists(projectPath, 'package.json');
-    
+
     const result: LanguageInfo[] = [];
-    
+
     if (hasTypeScript) {
       result.push({
         name: 'TypeScript',
@@ -216,7 +210,7 @@ export class MetadataCollector {
         lineCount: 0 // Would be calculated
       });
     }
-    
+
     if (hasJavaScript) {
       result.push({
         name: 'JavaScript',
@@ -234,7 +228,7 @@ export class MetadataCollector {
     pythonVersion?: string;
     javaVersion?: string;
   }> {
-    const versions: any = {};
+    const versions: Record<string, string> = {};
 
     // Check for .nvmrc (Node version)
     const nvmrcPath = path.join(projectPath, '.nvmrc');
@@ -244,8 +238,15 @@ export class MetadataCollector {
     } catch {
       // Check package.json engines
       const packageJson = await this.readJsonFile(path.join(projectPath, 'package.json'));
-      if (packageJson?.engines?.node) {
-        versions.nodeVersion = packageJson.engines.node;
+      if (
+        typeof packageJson === 'object' && packageJson !== null &&
+        'engines' in packageJson &&
+        typeof (packageJson as { engines?: unknown }).engines === 'object' &&
+        (packageJson as { engines?: unknown }).engines !== null &&
+        'node' in (packageJson as { engines: { [key: string]: unknown } }).engines &&
+        typeof ((packageJson as { engines: { [key: string]: unknown } }).engines as { [key: string]: unknown }).node === 'string'
+      ) {
+        versions.nodeVersion = ((packageJson as { engines: { [key: string]: unknown } }).engines as { [key: string]: string }).node;
       }
     }
 
@@ -257,8 +258,15 @@ export class MetadataCollector {
     } catch {
       // Check for Pipfile
       const pipfile = await this.readJsonFile(path.join(projectPath, 'Pipfile'));
-      if (pipfile?.requires?.python_version) {
-        versions.pythonVersion = pipfile.requires.python_version;
+      if (
+        typeof pipfile === 'object' && pipfile !== null &&
+        'requires' in pipfile &&
+        typeof (pipfile as { requires?: unknown }).requires === 'object' &&
+        (pipfile as { requires?: unknown }).requires !== null &&
+        'python_version' in (pipfile as { requires: { [key: string]: unknown } }).requires &&
+        typeof ((pipfile as { requires: { [key: string]: unknown } }).requires as { [key: string]: unknown }).python_version === 'string'
+      ) {
+        versions.pythonVersion = ((pipfile as { requires: { [key: string]: unknown } }).requires as { [key: string]: string }).python_version;
       }
     }
 

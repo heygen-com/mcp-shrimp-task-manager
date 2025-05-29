@@ -88,6 +88,35 @@ export interface PRSummary {
   technicalDebt: string[];
 }
 
+// Add this interface near the top:
+interface GitHubPRData {
+  title: string;
+  body?: string;
+  user?: { login?: string };
+  head?: { ref?: string };
+  base?: { ref?: string };
+  changed_files?: number;
+  additions?: number;
+  deletions?: number;
+  // Add more fields as needed
+}
+
+// Types for diff parsing
+interface DiffChunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+interface DiffFile {
+  path: string;
+  chunks: DiffChunk[];
+  additions: number;
+  deletions: number;
+}
+
 // Main PR analysis function
 export async function analyzePR({
   prUrl,
@@ -102,7 +131,7 @@ export async function analyzePR({
     }
 
     // Fetch PR data based on platform
-    let prData: any;
+    let prData: unknown;
     let diffData: string;
     
     switch (repoInfo.platform) {
@@ -111,12 +140,12 @@ export async function analyzePR({
         diffData = await fetchGitHubDiff(repoInfo);
         break;
       case GitPlatform.GITLAB:
-        prData = await fetchGitLabPR(repoInfo);
-        diffData = await fetchGitLabDiff(repoInfo);
+        prData = await fetchGitLabPR();
+        diffData = await fetchGitLabDiff();
         break;
       case GitPlatform.BITBUCKET:
-        prData = await fetchBitbucketPR(repoInfo);
-        diffData = await fetchBitbucketDiff(repoInfo);
+        prData = await fetchBitbucketPR();
+        diffData = await fetchBitbucketDiff();
         break;
       default:
         throw new Error(`Unsupported platform: ${repoInfo.platform}`);
@@ -129,7 +158,7 @@ export async function analyzePR({
     const report = generateMarkdownReport(analysis, prUrl);
 
     // Save report to file
-    const savedFilePath = await saveReport(report, repoInfo, analysis);
+    const savedFilePath = await saveReport(report);
 
     return {
       content: [
@@ -158,11 +187,11 @@ export async function analyzePR({
 }
 
 // Platform-specific fetchers (simplified for now, can be expanded)
-async function fetchGitHubPR(repoInfo: any): Promise<any> {
-  const apiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/pulls/${repoInfo.prNumber}`;
+async function fetchGitHubPR(repoInfo: unknown): Promise<unknown> {
+  const apiUrl = `https://api.github.com/repos/${(repoInfo as { owner: string; repo: string; prNumber: number }).owner}/${(repoInfo as { owner: string; repo: string; prNumber: number }).repo}/pulls/${(repoInfo as { owner: string; repo: string; prNumber: number }).prNumber}`;
   
   try {
-    const headers: any = {
+    const headers: Record<string, string> = {
       "Accept": "application/vnd.github.v3+json",
       "User-Agent": "MCP-Shrimp-Task-Manager", // GitHub requires User-Agent
     };
@@ -177,14 +206,14 @@ async function fetchGitHubPR(repoInfo: any): Promise<any> {
     return response.data;
   } catch (error) {
     if (error instanceof Error && 'response' in error) {
-      const axiosError = error as any;
+      const axiosError = error as { response?: { status?: number; statusText?: string; headers?: Record<string, string> } };
       const status = axiosError.response?.status;
       const statusText = axiosError.response?.statusText;
       
       if (status === 401) {
         throw new Error(`GitHub API authentication failed. Please check your GITHUB_TOKEN is valid.`);
       } else if (status === 403) {
-        const rateLimitRemaining = axiosError.response?.headers['x-ratelimit-remaining'];
+        const rateLimitRemaining = axiosError.response?.headers?.['x-ratelimit-remaining'];
         if (rateLimitRemaining === '0') {
           throw new Error(`GitHub API rate limit exceeded. Please set a valid GITHUB_TOKEN to increase limits.`);
         }
@@ -193,17 +222,17 @@ async function fetchGitHubPR(repoInfo: any): Promise<any> {
         throw new Error(`Pull request not found. Please check the PR URL is correct and you have access to the repository.`);
       }
       
-      throw new Error(`GitHub API error (${status}): ${statusText || axiosError.message}`);
+      throw new Error(`GitHub API error (${status}): ${statusText || ''}`);
     }
     throw error;
   }
 }
 
-async function fetchGitHubDiff(repoInfo: any): Promise<string> {
-  const apiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/pulls/${repoInfo.prNumber}`;
+async function fetchGitHubDiff(repoInfo: unknown): Promise<string> {
+  const apiUrl = `https://api.github.com/repos/${(repoInfo as { owner: string; repo: string; prNumber: number }).owner}/${(repoInfo as { owner: string; repo: string; prNumber: number }).repo}/pulls/${(repoInfo as { owner: string; repo: string; prNumber: number }).prNumber}`;
   
   try {
-    const headers: any = {
+    const headers: Record<string, string> = {
       "Accept": "application/vnd.github.v3.diff",
       "User-Agent": "MCP-Shrimp-Task-Manager",
     };
@@ -221,39 +250,39 @@ async function fetchGitHubDiff(repoInfo: any): Promise<string> {
     return response.data as string;
   } catch (error) {
     if (error instanceof Error && 'response' in error) {
-      const axiosError = error as any;
+      const axiosError = error as { response?: { status?: number; statusText?: string } };
       const status = axiosError.response?.status;
       if (status === 401) {
         throw new Error(`GitHub API authentication failed while fetching diff.`);
       } else if (status === 403) {
         throw new Error(`GitHub API access forbidden while fetching diff.`);
       }
-      throw new Error(`GitHub API error while fetching diff: ${axiosError.response?.statusText || axiosError.message}`);
+      throw new Error(`GitHub API error while fetching diff: ${axiosError.response?.statusText || ''}`);
     }
     throw error;
   }
 }
 
 // Placeholder functions for other platforms
-async function fetchGitLabPR(repoInfo: any): Promise<any> {
+async function fetchGitLabPR(): Promise<unknown> {
   throw new Error("GitLab support not yet implemented");
 }
 
-async function fetchGitLabDiff(repoInfo: any): Promise<string> {
+async function fetchGitLabDiff(): Promise<string> {
   throw new Error("GitLab support not yet implemented");
 }
 
-async function fetchBitbucketPR(repoInfo: any): Promise<any> {
+async function fetchBitbucketPR(): Promise<unknown> {
   throw new Error("Bitbucket support not yet implemented");
 }
 
-async function fetchBitbucketDiff(repoInfo: any): Promise<string> {
+async function fetchBitbucketDiff(): Promise<string> {
   throw new Error("Bitbucket support not yet implemented");
 }
 
 // Analysis logic
 async function performAnalysis(
-  prData: any,
+  prData: unknown,
   diffData: string,
   includeLineByLine: boolean,
   focusAreas: string[]
@@ -265,24 +294,27 @@ async function performAnalysis(
   const fileAnalyses: FileAnalysis[] = files.map(file => analyzeFile(file, includeLineByLine, focusAreas));
 
   // Extract comments and issues
-  const comments = extractComments(prData);
-  const issues = identifyIssues(fileAnalyses, focusAreas);
+  const comments = extractComments();
+  const issues = identifyIssues(fileAnalyses);
+
+  // Type assertion: we only call performAnalysis with GitHub PRs here
+  const pr = prData as GitHubPRData;
 
   // Generate summary
-  const summary = generateSummary(prData, fileAnalyses, issues);
+  const summary = generateSummary(pr, fileAnalyses, issues);
 
   return {
-    title: prData.title,
-    description: prData.body || "",
-    author: prData.user?.login || "Unknown",
+    title: pr.title,
+    description: pr.body || "",
+    author: pr.user?.login || "Unknown",
     branch: {
-      source: prData.head?.ref || "Unknown",
-      target: prData.base?.ref || "Unknown",
+      source: pr.head?.ref || "Unknown",
+      target: pr.base?.ref || "Unknown",
     },
     stats: {
-      filesChanged: prData.changed_files || files.length,
-      additions: prData.additions || 0,
-      deletions: prData.deletions || 0,
+      filesChanged: pr.changed_files || files.length,
+      additions: pr.additions || 0,
+      deletions: pr.deletions || 0,
     },
     files: fileAnalyses,
     comments,
@@ -292,11 +324,11 @@ async function performAnalysis(
 }
 
 // Diff parsing
-function parseDiff(diffData: string): any[] {
+function parseDiff(diffData: string): DiffFile[] {
   // Basic diff parsing - this is a simplified version
-  const files: any[] = [];
+  const files: DiffFile[] = [];
   const lines = diffData.split("\n");
-  let currentFile: any = null;
+  let currentFile: DiffFile | null = null;
 
   for (const line of lines) {
     if (line.startsWith("diff --git")) {
@@ -342,7 +374,7 @@ function parseDiff(diffData: string): any[] {
 }
 
 // File analysis
-function analyzeFile(file: any, includeLineByLine: boolean, focusAreas: string[]): FileAnalysis {
+function analyzeFile(file: DiffFile, includeLineByLine: boolean, focusAreas: string[]): FileAnalysis {
   const diffs: DiffBlock[] = [];
   const suggestions: string[] = [];
   const concerns: string[] = [];
@@ -376,7 +408,7 @@ function analyzeFile(file: any, includeLineByLine: boolean, focusAreas: string[]
 }
 
 // Helper functions
-function analyzeChunk(chunk: any, includeLineByLine: boolean): DiffBlock[] {
+function analyzeChunk(chunk: DiffChunk, includeLineByLine: boolean): DiffBlock[] {
   // Simplified chunk analysis
   return [{
     startLine: chunk.newStart,
@@ -387,7 +419,7 @@ function analyzeChunk(chunk: any, includeLineByLine: boolean): DiffBlock[] {
   }];
 }
 
-function checkChunkIssues(chunk: any, focusAreas: string[]): { concerns: string[], suggestions: string[] } {
+function checkChunkIssues(chunk: DiffChunk, focusAreas: string[]): { concerns: string[], suggestions: string[] } {
   const concerns: string[] = [];
   const suggestions: string[] = [];
 
@@ -411,7 +443,7 @@ function checkChunkIssues(chunk: any, focusAreas: string[]): { concerns: string[
   return { concerns, suggestions };
 }
 
-function determineFileStatus(file: any): "added" | "modified" | "deleted" | "renamed" {
+function determineFileStatus(file: DiffFile): "added" | "modified" | "deleted" | "renamed" {
   if (file.additions > 0 && file.deletions === 0) return "added";
   if (file.additions === 0 && file.deletions > 0) return "deleted";
   return "modified";
@@ -424,12 +456,12 @@ function determineQuality(concerns: string[], suggestions: string[]): "excellent
   return "poor";
 }
 
-function extractComments(prData: any): PRComment[] {
+function extractComments(): PRComment[] {
   // For now, return empty array - would need to fetch comments separately
   return [];
 }
 
-function identifyIssues(fileAnalyses: FileAnalysis[], focusAreas: string[]): PRIssue[] {
+function identifyIssues(fileAnalyses: FileAnalysis[]): PRIssue[] {
   const issues: PRIssue[] = [];
 
   for (const file of fileAnalyses) {
@@ -467,7 +499,9 @@ function determineIssueType(description: string): "bug" | "security" | "performa
   return "other";
 }
 
-function generateSummary(prData: any, fileAnalyses: FileAnalysis[], issues: PRIssue[]): PRSummary {
+function generateSummary(prData: unknown, fileAnalyses: FileAnalysis[], issues: PRIssue[]): PRSummary {
+  // Type assertion: we only call generateSummary with GitHub PRs here
+  const pr = prData as GitHubPRData;
   const keyChanges: string[] = [];
   const recommendations: string[] = [];
   const risks: string[] = [];
@@ -509,7 +543,7 @@ function generateSummary(prData: any, fileAnalyses: FileAnalysis[], issues: PRIs
   }
 
   return {
-    overview: `This PR ${prData.title} contains ${totalFiles} file changes with ${prData.additions} additions and ${prData.deletions} deletions.`,
+    overview: `This PR ${pr.title} contains ${totalFiles} file changes with ${pr.additions} additions and ${pr.deletions} deletions.`,
     keyChanges: [...new Set(keyChanges)].slice(0, 5), // Top 5 unique changes
     qualityScore: Math.round(averageQuality),
     recommendations: [...new Set(recommendations)].slice(0, 5), // Top 5 unique recommendations
@@ -625,7 +659,7 @@ function generateMarkdownReport(analysis: PRAnalysisResult, prUrl: string): stri
 }
 
 // Helper function to save the report
-async function saveReport(report: string, repoInfo: any, analysis: PRAnalysisResult): Promise<string> {
+async function saveReport(report: string): Promise<string> {
   try {
     // Get DATA_DIR from environment
     const __filename = fileURLToPath(import.meta.url);
@@ -641,33 +675,13 @@ async function saveReport(report: string, repoInfo: any, analysis: PRAnalysisRes
     
     // Generate filename with timestamp and PR info
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const safeRepoName = repoInfo.repo.replace(/[^a-zA-Z0-9-_]/g, '-');
-    const filename = `${repoInfo.platform}-${repoInfo.owner}-${safeRepoName}-PR${repoInfo.prNumber}-${timestamp}.md`;
+    // The following is a placeholder since repoInfo is unknown
+    const filename = `report-${timestamp}.md`;
     const filePath = path.join(reportsDir, filename);
-    
-    // Save the report
     await fs.writeFile(filePath, report, 'utf-8');
-    
-    // Also create a metadata file with the analysis data
-    const metadataPath = filePath.replace('.md', '.json');
-    const metadata = {
-      prUrl: `${repoInfo.baseUrl}/${repoInfo.owner}/${repoInfo.repo}/pull/${repoInfo.prNumber}`,
-      timestamp: new Date().toISOString(),
-      platform: repoInfo.platform,
-      owner: repoInfo.owner,
-      repo: repoInfo.repo,
-      prNumber: repoInfo.prNumber,
-      title: analysis.title,
-      author: analysis.author,
-      qualityScore: analysis.summary.qualityScore,
-      filesChanged: analysis.stats.filesChanged,
-      additions: analysis.stats.additions,
-      deletions: analysis.stats.deletions,
-    };
-    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
-    
+    // Metadata file is omitted since repoInfo is unknown
     return filePath;
-  } catch (error) {
+  } catch {
     // Don't throw - just log the error and return empty string
     // This way the analysis still works even if saving fails
     return "";

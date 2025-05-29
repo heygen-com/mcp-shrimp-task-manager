@@ -16,7 +16,13 @@ export const ConsolidateTranslationMemoryInputSchema = z.object({
   dryRun: z.boolean().default(false).describe('If true, shows what would be consolidated without making changes')
 });
 
-// Types
+// Add DialogTurn interface
+interface DialogTurn {
+  role: string;
+  content: string;
+  timestamp: string | Date;
+}
+
 interface TranslationMemoryEntry {
   id: string;
   sourceText: string;
@@ -29,12 +35,12 @@ interface TranslationMemoryEntry {
   usageCount: number;
   lastUsed: Date;
   created: Date;
-  dialog?: any[];
+  dialog?: DialogTurn[];
 }
 
 interface DialogData {
   id: string;
-  turns: any[];
+  turns: DialogTurn[];
   sourceContent: string;
   targetLanguage: string;
   status: string;
@@ -51,15 +57,15 @@ async function getTranslationMemoryDir(): Promise<string> {
 }
 
 // Revive dates in objects
-function reviveDates(obj: any): any {
-  if (obj.lastUsed && typeof obj.lastUsed === 'string') {
-    obj.lastUsed = new Date(obj.lastUsed);
+function reviveDates<T extends object>(obj: T): T {
+  if ('lastUsed' in obj && typeof (obj as { lastUsed: unknown }).lastUsed === 'string') {
+    (obj as { lastUsed: Date }).lastUsed = new Date((obj as { lastUsed: string }).lastUsed);
   }
-  if (obj.created && typeof obj.created === 'string') {
-    obj.created = new Date(obj.created);
+  if ('created' in obj && typeof (obj as { created: unknown }).created === 'string') {
+    (obj as { created: Date }).created = new Date((obj as { created: string }).created);
   }
-  if (obj.lastUpdated && typeof obj.lastUpdated === 'string') {
-    obj.lastUpdated = new Date(obj.lastUpdated);
+  if ('lastUpdated' in obj && typeof (obj as { lastUpdated: unknown }).lastUpdated === 'string') {
+    (obj as { lastUpdated: Date }).lastUpdated = new Date((obj as { lastUpdated: string }).lastUpdated);
   }
   return obj;
 }
@@ -81,7 +87,7 @@ function extractTranslationFromDialog(dialog: DialogData): {
           if (response.translation) {
             // Extract context from primary turn
             let context = '';
-            let domain = 'general';
+            const domain = 'general';
             
             const primaryTurn = dialog.turns.find(t => t.role === 'primary');
             if (primaryTurn && primaryTurn.content) {
@@ -99,7 +105,7 @@ function extractTranslationFromDialog(dialog: DialogData): {
               domain: response.domain || domain
             };
           }
-        } catch (e) {
+        } catch {
           // Continue to next turn
         }
       }

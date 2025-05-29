@@ -118,7 +118,7 @@ export function getGetTaskDetailPrompt(
   const indexTemplate = loadPromptFromTemplate("getTaskDetail/index.md");
 
   // 開始構建基本 prompt
-  let prompt = generatePrompt(indexTemplate, {
+  const prompt = generatePrompt(indexTemplate, {
     name: task.name,
     id: task.id,
     status: task.status,

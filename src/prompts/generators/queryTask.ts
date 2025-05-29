@@ -29,7 +29,7 @@ export interface QueryTaskPromptParams {
  * @returns 生成的 prompt
  */
 export function getQueryTaskPrompt(params: QueryTaskPromptParams): string {
-  const { query, isId, tasks, totalTasks, page, pageSize, totalPages } = params;
+  const { query, tasks, totalTasks, page, pageSize, totalPages } = params;
 
   if (tasks.length === 0) {
     const notFoundTemplate = loadPromptFromTemplate("queryTask/notFound.md");

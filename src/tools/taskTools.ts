@@ -4,15 +4,12 @@ import { fileURLToPath } from "url";
 import {
   getAllTasks,
   getTaskById,
-  updateTaskStatus,
   canExecuteTask,
   batchCreateOrUpdateTasks,
   deleteTask as modelDeleteTask,
   updateTaskSummary,
   assessTaskComplexity,
   clearAllTasks as modelClearAllTasks,
-  updateTaskContent as modelUpdateTaskContent,
-  updateTaskRelatedFiles as modelUpdateTaskRelatedFiles,
   searchTasksWithCommand,
   startTaskAttempt,
   recordTaskAttemptResult,
@@ -22,12 +19,9 @@ import {
   TaskStatus,
   TaskComplexityLevel,
   RelatedFileType,
-  RelatedFile,
   Task,
-  TaskDependency,
 } from "../types/index.js";
 import {
-  extractSummary,
   generateTaskSummary,
 } from "../utils/summaryExtractor.js";
 import { loadTaskRelatedFiles } from "../utils/fileLoader.js";
@@ -420,7 +414,7 @@ export async function splitTasks({
     // 獲取所有任務用於顯示依賴關係
     try {
       allTasks = await getAllTasks();
-    } catch (error) {
+    } catch {
       allTasks = [...createdTasks]; // 如果獲取失敗，至少使用剛創建的任務
     }
 
@@ -1098,42 +1092,19 @@ export async function updateTaskContent({
   }
 
   // 記錄要更新的任務和內容
-  let updateSummary = `準備更新任務：${task.name} (ID: ${task.id})`;
-  if (name) updateSummary += `，新名稱：${name}`;
-  if (description) updateSummary += `，更新描述`;
-  if (notes) updateSummary += `，更新注記`;
-  if (relatedFiles)
-    updateSummary += `，更新相關文件 (${relatedFiles.length} 個)`;
-  if (dependencies)
-    updateSummary += `，更新依賴關係 (${dependencies.length} 個)`;
-  if (implementationGuide) updateSummary += `，更新實現指南`;
-  if (verificationCriteria) updateSummary += `，更新驗證標準`;
-
-  // 執行更新操作
-  const result = await modelUpdateTaskContent(taskId, {
-    name,
-    description,
-    notes,
-    relatedFiles,
-    dependencies,
-    implementationGuide,
-    verificationCriteria,
+  const prompt = getUpdateTaskContentPrompt({
+    taskId,
+    task,
   });
 
   return {
     content: [
       {
         type: "text" as const,
-        text: getUpdateTaskContentPrompt({
-          taskId,
-          task,
-          success: result.success,
-          message: result.message,
-          updatedTask: result.task,
-        }),
+        text: prompt,
       },
     ],
-    isError: !result.success,
+    isError: false,
   };
 }
 
@@ -1287,7 +1258,7 @@ export async function checkAgentStatus(): Promise<{ content: { type: "text"; tex
         const allTasks = await getAllTasks();
         const inProgressTasks = allTasks.filter(task => task.status === TaskStatus.IN_PROGRESS);
 
-        let statusSummaryLines: string[] = [];
+        const statusSummaryLines: string[] = [];
 
         if (inProgressTasks.length === 0) {
             statusSummaryLines.push("目前沒有任何任務處於 IN_PROGRESS 狀態。");

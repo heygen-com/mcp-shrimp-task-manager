@@ -8,7 +8,7 @@ export const logDataDirSchema = z.object({});
 /**
  * Logs the path to the tasks.json file based on the configured DATA_DIR.
  */
-export async function logDataDir(_args: z.infer<typeof logDataDirSchema>) {
+export async function logDataDir() {
   try {
     // Determine the project root and data directory
     const __filename = fileURLToPath(import.meta.url);
@@ -58,7 +58,7 @@ export async function logDataDir(_args: z.infer<typeof logDataDirSchema>) {
 export const checkEnvSchema = z.object({});
 
 // Tool function to check environment variables
-export async function checkEnv(_args: z.infer<typeof checkEnvSchema>) {
+export async function checkEnv() {
   const envVars = {
     DATA_DIR: process.env.DATA_DIR || "(not set)",
     GITHUB_TOKEN: process.env.GITHUB_TOKEN ? `Set (${process.env.GITHUB_TOKEN.substring(0, 10)}...)` : "(not set)",

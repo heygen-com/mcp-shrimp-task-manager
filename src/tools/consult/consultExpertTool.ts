@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import OpenAI from 'openai';
 import { getTaskById, updateTask } from '../../models/taskModel.js'; // <-- Import task model functions
-import { ExpertSuggestion, TaskStatus, Task } from '../../types/index.js'; // <-- Import ExpertSuggestion type
-import { loadPromptFromTemplate, generatePrompt } from '../../prompts/loader.js'; // Corrected import path
+import { ExpertSuggestion, Task } from '../../types/index.js'; // <-- Import ExpertSuggestion type
+import { loadPromptFromTemplate } from '../../prompts/loader.js'; // Corrected import path
 
 // Define the input schema for the tool using Zod
 export const ConsultExpertInputSchema = z.object({
@@ -57,7 +57,7 @@ function calculateSimilarity(str1: string, str2: string): number {
   const jaro = (m / s1.length + m / s2.length + (m - t) / m) / 3;
   
   // Jaro-Winkler adjustment
-  let p = 0.1; // Scaling factor
+  const p = 0.1; // Scaling factor
   let l = 0; // Length of common prefix
   const maxPrefixLength = 4;
   while(l < maxPrefixLength && s1[l] && s2[l] && s1[l] === s2[l]) {
@@ -82,20 +82,20 @@ async function callOpenAI(prompt: string): Promise<string> {
       response_format: { type: "json_object" },
     });
 
-    let rawContent = completion.choices[0]?.message?.content;
+    const rawContent = completion.choices[0]?.message?.content;
 
     if (rawContent) {
       try {
         // OpenAI should return a JSON string, parse it
-        const parsedJson = JSON.parse(rawContent);
-        // We expect a specific structure like { "advice": "..." }
-        if (parsedJson && typeof parsedJson.advice === 'string') {
-          return parsedJson.advice; // Return the core advice string
+        const jsonRegex = /{\s*"advice"\s*:\s*"([\s\S]*?)"\s*}/;
+        const match = rawContent.match(jsonRegex);
+        if (match && match.length > 1) {
+          return match[1]; // Return the core advice string
         } else {
           // The JSON is not in the expected format, return a clear error
           return JSON.stringify({ error: 'OpenAI returned JSON but not in the expected { "advice": "..." } format.', raw: rawContent });
         }
-      } catch (e) {
+      } catch {
         // If JSON.parse fails, OpenAI didn't adhere to response_format: { type: "json_object" }
         return JSON.stringify({ error: 'Failed to parse JSON response from OpenAI, though JSON was requested.', raw: rawContent });
       }
@@ -214,7 +214,7 @@ async function getOpenAIAdvice(problem_description: string, relevant_context: st
   if (task_goal) {
     prompt += `\n\nOverall Task Goal: ${task_goal}`;
   }
-  prompt += `\n\n${instruction}\n\nRespond ONLY in JSON format as { \"advice\": \"...\" } and nothing else. (This is required for correct parsing. Output must be valid JSON.)`;
+  prompt += `\n\n${instruction}\n\nRespond ONLY in JSON format as { "advice": "..." } and nothing else. (This is required for correct parsing. Output must be valid JSON.)`;
   
   return await callOpenAI(prompt);
 }

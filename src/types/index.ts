@@ -164,7 +164,7 @@ export interface ProjectContext {
   content: string; // Context content
   tags?: string[]; // Tags for categorization
   relatedTaskIds?: string[]; // Related task IDs
-  metadata?: Record<string, any>; // Additional metadata
+  metadata?: Record<string, unknown>; // Additional metadata
   createdAt: Date; // Creation timestamp
 }
 
@@ -196,5 +196,5 @@ export interface ProjectReport {
     totalContexts: number;
     totalInsights: number;
   };
-  content: Record<string, any>; // Report content varies by type
+  content: Record<string, unknown>; // Report content varies by type
 }

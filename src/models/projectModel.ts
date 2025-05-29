@@ -33,9 +33,10 @@ if (process.env.MCP_DEBUG_LOGGING === "true") {
 async function ensureProjectsDir() {
   try {
     await fs.access(PROJECTS_DIR);
-  } catch (error) {
-    await fs.mkdir(PROJECTS_DIR, { recursive: true });
+  } catch {
+    // intentionally empty: directory will be created if not found
   }
+  await fs.mkdir(PROJECTS_DIR, { recursive: true });
 }
 
 // Get project directory path
@@ -68,7 +69,7 @@ async function readProjectMetadata(projectId: string): Promise<Project | null> {
       createdAt: new Date(project.createdAt),
       updatedAt: new Date(project.updatedAt),
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -137,7 +138,7 @@ export async function getAllProjects(): Promise<Project[]> {
     }
     
     return projects.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -177,7 +178,7 @@ export async function deleteProject(projectId: string): Promise<boolean> {
     const paths = getProjectPaths(projectId);
     await fs.rm(paths.projectDir, { recursive: true, force: true });
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -248,14 +249,11 @@ export async function addProjectContext(
 // Get project contexts
 export async function getProjectContexts(projectId: string): Promise<ProjectContext[]> {
   const project = await readProjectMetadata(projectId);
-  
   if (!project) {
     return [];
   }
-  
   const { contextDir } = getProjectPaths(projectId);
   const contexts: ProjectContext[] = [];
-  
   for (const contextId of project.contextIds) {
     try {
       const contextFile = path.join(contextDir, `${contextId}.json`);
@@ -265,11 +263,10 @@ export async function getProjectContexts(projectId: string): Promise<ProjectCont
         ...context,
         createdAt: new Date(context.createdAt),
       });
-    } catch (error) {
+    } catch {
       // Skip if context file not found
     }
   }
-  
   return contexts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
@@ -307,14 +304,11 @@ export async function addProjectInsight(
 // Get project insights
 export async function getProjectInsights(projectId: string): Promise<ProjectInsight[]> {
   const project = await readProjectMetadata(projectId);
-  
   if (!project) {
     return [];
   }
-  
   const { contextDir } = getProjectPaths(projectId);
   const insights: ProjectInsight[] = [];
-  
   for (const insightId of project.insightIds) {
     try {
       // Try new naming convention first
@@ -325,7 +319,7 @@ export async function getProjectInsights(projectId: string): Promise<ProjectInsi
         ...insight,
         createdAt: new Date(insight.createdAt),
       });
-    } catch (error) {
+    } catch {
       // Try old naming convention as fallback
       try {
         const oldInsightFile = path.join(contextDir, `insight_${insightId}.json`);
@@ -335,12 +329,11 @@ export async function getProjectInsights(projectId: string): Promise<ProjectInsi
           ...insight,
           createdAt: new Date(insight.createdAt),
         });
-      } catch (fallbackError) {
+      } catch {
         // Skip if insight file not found in either format
       }
     }
   }
-  
   return insights.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 

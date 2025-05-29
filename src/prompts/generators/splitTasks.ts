@@ -19,6 +19,11 @@ export interface SplitTasksPromptParams {
   allTasks: Task[];
 }
 
+// Add a type guard for objects with a 'taskId' property
+function hasTaskId(obj: unknown): obj is { taskId: string } {
+  return typeof obj === 'object' && obj !== null && 'taskId' in obj && typeof (obj as { taskId: unknown }).taskId === 'string';
+}
+
 /**
  * 獲取 splitTasks 的完整 prompt
  * @param params prompt 參數
@@ -49,12 +54,15 @@ export function getSplitTasksPrompt(params: SplitTasksPromptParams): string {
 
       const dependencies = task.dependencies
         ? task.dependencies
-            .map((d: any) => {
-              // 查找依賴任務的名稱，提供更友好的顯示
-              const depTask = params.allTasks.find((t) => t.id === d.taskId);
-              return depTask
-                ? `"${depTask.name}" (\`${d.taskId}\`)`
-                : `\`${d.taskId}\``;
+            .map((d: unknown) => {
+              if (typeof d === 'string') {
+                const depTask = params.allTasks.find((t) => t.id === d);
+                return depTask ? `${depTask.name} (ID: ${depTask.id})` : d;
+              } else if (hasTaskId(d)) {
+                const depTask = params.allTasks.find((t) => t.id === d.taskId);
+                return depTask ? `${depTask.name} (ID: ${depTask.id})` : d.taskId;
+              }
+              return '';
             })
             .join(", ")
         : "no dependencies";

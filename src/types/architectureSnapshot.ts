@@ -134,20 +134,20 @@ export interface ConfigFile {
   path: string;
   type: string;
   purpose: string;
-  schema?: any;
+  schema?: unknown;
 }
 
 export interface FeatureFlag {
   name: string;
   description?: string;
-  defaultValue: any;
+  defaultValue: unknown;
   type: string;
 }
 
 export interface BuildConfig {
   name: string;
   environment: string;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
 }
 
 export interface CodeOrganization {
@@ -217,7 +217,7 @@ export interface Parameter {
 export interface Response {
   status: number;
   description: string;
-  schema?: any;
+  schema?: unknown;
 }
 
 export interface GraphQLSchema {
@@ -231,7 +231,7 @@ export interface WebSocketEvent {
   name: string;
   direction: 'send' | 'receive' | 'both';
   description?: string;
-  payload?: any;
+  payload?: unknown;
 }
 
 export interface CLICommand {
@@ -334,8 +334,8 @@ export interface ArchitectureChanges {
   structure: ChangeSet<DirectoryNode>;
   dependencies: ChangeSet<Dependency>;
   configuration: ChangeSet<ConfigFile>;
-  api: ChangeSet<any>;
-  tests: ChangeSet<any>;
+  api: ChangeSet<unknown>;
+  tests: ChangeSet<unknown>;
 }
 
 export interface ChangeSet<T> {

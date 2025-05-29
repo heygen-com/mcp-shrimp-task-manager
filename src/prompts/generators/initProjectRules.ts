@@ -12,18 +12,13 @@ import { getRulesFilePath } from "../../utils/pathUtils.js";
 /**
  * initProjectRules prompt 參數介面
  */
-export interface InitProjectRulesPromptParams {
-  // 目前沒有額外參數，未來可按需擴展
-}
+export type InitProjectRulesPromptParams = object;
 
 /**
  * 獲取 initProjectRules 的完整 prompt
- * @param params prompt 參數（可選）
  * @returns 生成的 prompt
  */
-export function getInitProjectRulesPrompt(
-  params?: InitProjectRulesPromptParams
-): string {
+export function getInitProjectRulesPrompt(): string {
   // 使用基本模板
   const rulesPath = getRulesFilePath();
   const indexTemplate = loadPromptFromTemplate("initProjectRules/index.md");

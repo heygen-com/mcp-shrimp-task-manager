@@ -31,15 +31,17 @@ const execPromise = promisify(exec);
 async function ensureDataDir() {
   try {
     await fs.access(DATA_DIR);
-  } catch (error) {
-    await fs.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    // intentionally empty
   }
 
   try {
     await fs.access(TASKS_FILE);
-  } catch (error) {
-    await fs.writeFile(TASKS_FILE, JSON.stringify({ tasks: [] }));
+  } catch {
+    // intentionally empty
   }
+
+  await fs.writeFile(TASKS_FILE, JSON.stringify({ tasks: [] }));
 }
 
 // 讀取所有任務
@@ -49,7 +51,7 @@ async function readTasks(): Promise<Task[]> {
   const tasks = JSON.parse(data).tasks;
 
   // 將日期字串轉換回 Date 物件
-  return tasks.map((task: any) => {
+  return tasks.map((task: Task) => {
     // Parse top-level dates
     const parsedTask = {
       ...task,
@@ -60,7 +62,7 @@ async function readTasks(): Promise<Task[]> {
 
     // Parse dates within expertSuggestions array
     if (parsedTask.expertSuggestions && Array.isArray(parsedTask.expertSuggestions)) {
-      parsedTask.expertSuggestions = parsedTask.expertSuggestions.map((suggestion: any) => ({
+      parsedTask.expertSuggestions = parsedTask.expertSuggestions.map((suggestion) => ({
         ...suggestion,
         timestamp: suggestion.timestamp ? new Date(suggestion.timestamp) : new Date(), // Parse timestamp
       }));
@@ -68,7 +70,7 @@ async function readTasks(): Promise<Task[]> {
 
     // Parse dates within attemptHistory array
     if (parsedTask.attemptHistory && Array.isArray(parsedTask.attemptHistory)) {
-      parsedTask.attemptHistory = parsedTask.attemptHistory.map((attempt: any) => ({
+      parsedTask.attemptHistory = parsedTask.attemptHistory.map((attempt) => ({
         ...attempt,
         timestamp: attempt.timestamp ? new Date(attempt.timestamp) : new Date(), // Parse timestamp
       }));
@@ -817,9 +819,11 @@ export async function clearAllTasks(): Promise<{
     const MEMORY_DIR = path.join(DATA_DIR, "memory");
     try {
       await fs.access(MEMORY_DIR);
-    } catch (error) {
-      await fs.mkdir(MEMORY_DIR, { recursive: true });
+    } catch {
+      // intentionally empty
     }
+
+    await fs.mkdir(MEMORY_DIR, { recursive: true });
 
     // 創建 memory 目錄下的備份路徑
     const memoryFilePath = path.join(MEMORY_DIR, backupFileName);
@@ -865,7 +869,7 @@ export async function searchTasksWithCommand(
 }> {
   // 讀取當前任務檔案中的任務
   const currentTasks = await readTasks();
-  let memoryTasks: Task[] = [];
+  const memoryTasks: Task[] = [];
 
   // 搜尋記憶資料夾中的任務
   const MEMORY_DIR = path.join(DATA_DIR, "memory");
@@ -912,7 +916,7 @@ export async function searchTasksWithCommand(
               const tasks = JSON.parse(data).tasks || [];
 
               // 格式化日期字段
-              const formattedTasks = tasks.map((task: any) => ({
+              const formattedTasks = tasks.map((task: Task) => ({
                 ...task,
                 createdAt: task.createdAt
                   ? new Date(task.createdAt)
@@ -952,12 +956,18 @@ export async function searchTasksWithCommand(
                   });
 
               memoryTasks.push(...filteredTasks);
-            } catch (error: unknown) {}
+            } catch {
+              // intentionally empty
+            }
           }
         }
-      } catch (error: unknown) {}
+      } catch {
+        // intentionally empty
+      }
     }
-  } catch (error: unknown) {}
+  } catch {
+    // intentionally empty
+  }
 
   // 從當前任務中過濾符合條件的任務
   const filteredCurrentTasks = filterCurrentTasks(currentTasks, query, isId);
@@ -1067,8 +1077,14 @@ function escapeShellArg(arg: string): string {
   if (!arg) return "";
 
   // 移除所有控制字符和特殊字符
-  return arg
-    .replace(/[\x00-\x1F\x7F]/g, "") // 控制字符
+   
+  return Array.from(arg)
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      // Exclude ASCII control characters (0x00-0x1F) and DEL (0x7F)
+      return (code > 0x1F && code !== 0x7F);
+    })
+    .join("")
     .replace(/[&;`$"'<>|]/g, ""); // Shell 特殊字符
 }
 

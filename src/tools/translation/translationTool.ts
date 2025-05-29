@@ -15,7 +15,7 @@ export let VERBOSE_LOGGING = false;
 export function setVerboseLogging(value: boolean) {
   VERBOSE_LOGGING = value;
 }
-function vLog(...args: any[]) {
+function vLog(...args: unknown[]) {
   if (VERBOSE_LOGGING) {
     console.error('[translationTool][VERBOSE]', ...args);
   }
@@ -94,19 +94,17 @@ async function loadTranslationMemory(sourceLanguage: string, targetLanguage: str
   const memoryFile = path.join(memoryDir, `${sourceLanguage}_to_${targetLanguage}.json`);
   vLog('Loading translation memory from', memoryFile);
   
-  function reviveDates(entry: any) {
-    if (entry.lastUsed && typeof entry.lastUsed === 'string') {
-      entry.lastUsed = new Date(entry.lastUsed);
-    }
-    if (entry.created && typeof entry.created === 'string') {
-      entry.created = new Date(entry.created);
-    }
-    if (entry.dialog && Array.isArray(entry.dialog)) {
-      entry.dialog.forEach((turn: any) => {
-        if (turn.timestamp && typeof turn.timestamp === 'string') {
-          turn.timestamp = new Date(turn.timestamp);
-        }
-      });
+  function reviveDates<T extends { created?: string | Date; lastUsed?: string | Date; lastUpdated?: string | Date }>(entry: T): T {
+    if (entry && typeof entry === 'object') {
+      if ('created' in entry && typeof entry.created === 'string') {
+        entry.created = new Date(entry.created);
+      }
+      if ('lastUsed' in entry && typeof entry.lastUsed === 'string') {
+        entry.lastUsed = new Date(entry.lastUsed);
+      }
+      if ('lastUpdated' in entry && typeof entry.lastUpdated === 'string') {
+        entry.lastUpdated = new Date(entry.lastUpdated);
+      }
     }
     return entry;
   }
@@ -115,9 +113,8 @@ async function loadTranslationMemory(sourceLanguage: string, targetLanguage: str
     const data = await fs.readFile(memoryFile, 'utf-8');
     vLog('Loaded translation memory data:', data.length, 'bytes');
     return JSON.parse(data).map(reviveDates);
-  } catch (err) {
-    vLog('No translation memory found at', memoryFile, 'or failed to load:', err instanceof Error ? err.message : String(err));
-    // Return empty array if file doesn't exist
+  } catch {
+    vLog('Error loading translation memory');
     return [];
   }
 }
@@ -189,7 +186,7 @@ function findSimilarTranslations(
 async function callOpenAIForTranslation(
   prompt: string,
   isJsonResponse: boolean = true
-): Promise<any> {
+): Promise<unknown> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY environment variable is not set.');
@@ -208,11 +205,11 @@ async function callOpenAIForTranslation(
     const rawContent = completion.choices[0]?.message?.content;
     vLog('OpenAI response received. Content length:', rawContent?.length || 0);
 
-    if (rawContent) {
+    if (typeof rawContent === 'string') {
       if (isJsonResponse) {
         try {
           return JSON.parse(rawContent);
-        } catch (e) {
+        } catch {
           vLog('Failed to parse JSON response from OpenAI:', rawContent);
           throw new Error(`Failed to parse JSON response from OpenAI: ${rawContent}`);
         }
@@ -309,6 +306,51 @@ async function generateLearningNotes(
   return notes;
 }
 
+// Helper function to generate clarification dialog markdown
+function generateClarificationMarkdown(dialog: TranslationDialog, response: unknown): string {
+  let md = `## Translation Dialog Started\n\n`;
+  md += `**Dialog ID:** ${dialog.id}\n\n`;
+  md += `The translator needs clarification:\n\n`;
+  const clarificationQuestion = (typeof response === 'object' && response !== null && 'clarificationQuestion' in response && typeof (response as { clarificationQuestion: unknown }).clarificationQuestion === 'string')
+    ? (response as { clarificationQuestion: string }).clarificationQuestion
+    : '[no clarification question]';
+  md += `**Question:** ${clarificationQuestion}\n\n`;
+  const confidence = (typeof response === 'object' && response !== null && 'confidence' in response && typeof (response as { confidence: unknown }).confidence === 'number'
+    ? (response as { confidence: number }).confidence
+    : 0.9);
+  let translation = '[no translation]';
+  if (typeof response === 'object' && response !== null && 'translation' in response) {
+    const t = (response as { translation?: unknown }).translation;
+    if (typeof t === 'string') {
+      translation = t;
+    }
+  }
+  md += `**Current best translation:** "${translation}" (confidence: ${(confidence * 100).toFixed(0)}%)\n\n`;
+  let alternatives: string[] = [];
+  if (typeof response === 'object' && response !== null && 'alternatives' in response) {
+    const alts = (response as { alternatives?: unknown }).alternatives;
+    if (Array.isArray(alts) && alts.every(a => typeof a === 'string')) {
+      alternatives = alts;
+    }
+  }
+  if (alternatives.length > 0) {
+    md += `**Alternative translations:**\n`;
+    md += alternatives.map((alt: string) => `- "${alt}"`).join('\n') + '\n';
+  }
+  let explanation = '';
+  if (typeof response === 'object' && response !== null && 'explanation' in response) {
+    const exp = (response as { explanation?: unknown }).explanation;
+    if (typeof exp === 'string' && exp) {
+      explanation = exp;
+    }
+  }
+  if (explanation) {
+    md += `**Explanation:** ${explanation}\n`;
+  }
+  md += `\nTo continue this dialog, use the \`translate_content\` tool again with:\n- \`previousDialogId\`: "${dialog.id}"\n- \`context\`: (provide the answer to the clarification question)\n`;
+  return md;
+}
+
 // Main translation function
 export async function translateContent(params: z.infer<typeof TranslateContentInputSchema>): Promise<{ content: { type: "text"; text: string }[] }> {
   try {
@@ -400,7 +442,6 @@ This translation was retrieved from cache. It has been used successfully ${exact
     
     // Load or create dialog
     let dialog = await loadDialog(previousDialogId);
-    const isNewDialog = !dialog;
     
     if (!dialog) {
       dialog = {
@@ -422,7 +463,7 @@ This translation was retrieved from cache. It has been used successfully ${exact
     vLog('Generated learning notes length:', learningNotes.length);
     
     // Build prompt
-    let prompt = `You are an expert translator specializing in context-aware, accurate translations. 
+    const prompt = `You are an expert translator specializing in context-aware, accurate translations. 
 
 Source Language: ${sourceLanguage}
 Target Language: ${targetLanguage}
@@ -488,10 +529,17 @@ Respond in JSON format:
     dialog.lastUpdated = new Date();
     
     // If clarification is needed, save dialog and return question
-    if (response.clarificationNeeded && response.clarificationQuestion) {
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'clarificationNeeded' in response &&
+      (response as { clarificationNeeded: boolean }).clarificationNeeded &&
+      'clarificationQuestion' in response &&
+      typeof (response as { clarificationQuestion: unknown }).clarificationQuestion === 'string'
+    ) {
       dialog.status = 'active';
       await saveDialog(dialog);
-      vLog('Dialog requires clarification:', response.clarificationQuestion);
+      vLog('Dialog requires clarification:', (response as { clarificationQuestion: string }).clarificationQuestion);
       
       if (returnFormat === 'json') {
         return {
@@ -500,49 +548,32 @@ Respond in JSON format:
             text: JSON.stringify({
               dialogId: dialog.id,
               clarificationNeeded: true,
-              clarificationQuestion: response.clarificationQuestion,
-              currentTranslation: response.translation,
-              confidence: response.confidence,
-              alternatives: response.alternatives || [],
-              explanation: response.explanation
+              clarificationQuestion: (response as { clarificationQuestion: string }).clarificationQuestion,
+              currentTranslation: (typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation?: unknown }).translation === 'string')
+                ? (response as { translation: string }).translation
+                : '',
+              confidence: typeof response === 'object' && response !== null && 'confidence' in response && typeof (response as { confidence: unknown }).confidence === 'number' ? (response as { confidence: number }).confidence : 0.9,
+              alternatives: typeof response === 'object' && response !== null && 'alternatives' in response ? (response as { alternatives: string[] }).alternatives || [] : [],
+              explanation: typeof response === 'object' && response !== null && 'explanation' in response ? (response as { explanation: string }).explanation : ''
             })
           }]
         };
       }
       
+      const clarificationMarkdown = generateClarificationMarkdown(dialog, response);
       return {
         content: [{
           type: "text" as const,
-          text: `## Translation Dialog Started
-
-**Dialog ID:** ${dialog.id}
-
-The translator needs clarification:
-
-**Question:** ${response.clarificationQuestion}
-
-**Current best translation:** "${response.translation}" (confidence: ${(response.confidence * 100).toFixed(0)}%)
-
-${response.alternatives?.length > 0 ? `
-**Alternative translations:**
-${response.alternatives.map((alt: string) => `- "${alt}"`).join('\n')}
-` : ''}
-
-${response.explanation ? `
-**Explanation:** ${response.explanation}
-` : ''}
-
-To continue this dialog, use the \`translate_content\` tool again with:
-- \`previousDialogId\`: "${dialog.id}"
-- \`context\`: (provide the answer to the clarification question)
-`
+          text: clarificationMarkdown
         }]
       };
     }
     
     // Translation is complete
     dialog.status = 'completed';
-    dialog.finalTranslation = response.translation;
+    if (typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation: unknown }).translation === 'string') {
+      dialog.finalTranslation = (response as { translation: string }).translation;
+    }
     await saveDialog(dialog);
     vLog('Dialog completed and saved:', dialog.id);
     
@@ -550,12 +581,12 @@ To continue this dialog, use the \`translate_content\` tool again with:
     const memoryEntry: TranslationMemoryEntry = {
       id: `tm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       sourceText: content,
-      targetText: response.translation,
+      targetText: typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation: unknown }).translation === 'string' ? (response as { translation: string }).translation : '',
       sourceLanguage,
       targetLanguage,
       context,
       domain,
-      confidence: response.confidence || 0.9,
+      confidence: typeof response === 'object' && response !== null && 'confidence' in response && typeof (response as { confidence: unknown }).confidence === 'number' ? (response as { confidence: number }).confidence : 0.9,
       usageCount: 1,
       lastUsed: new Date(),
       created: new Date(),
@@ -572,9 +603,15 @@ To continue this dialog, use the \`translate_content\` tool again with:
       // Update existing entry
       memory[existingIndex].usageCount++;
       memory[existingIndex].lastUsed = new Date();
-      if (response.confidence > memory[existingIndex].confidence) {
-        memory[existingIndex].targetText = response.translation;
-        memory[existingIndex].confidence = response.confidence;
+      if (
+        typeof response === 'object' &&
+        response !== null &&
+        'confidence' in response &&
+        typeof (response as { confidence: unknown }).confidence === 'number' &&
+        (response as { confidence: number }).confidence > memory[existingIndex].confidence
+      ) {
+        memory[existingIndex].targetText = typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation: unknown }).translation === 'string' ? (response as { translation: string }).translation : '';
+        memory[existingIndex].confidence = (response as { confidence: number }).confidence;
       }
       vLog('Updated existing translation memory entry:', JSON.stringify(memory[existingIndex]));
     } else {
@@ -592,11 +629,11 @@ To continue this dialog, use the \`translate_content\` tool again with:
         content: [{
           type: "text" as const,
           text: JSON.stringify({
-            translation: response.translation,
-            confidence: response.confidence,
-            alternatives: response.alternatives || [],
-            explanation: response.explanation,
-            domain_notes: response.domain_notes,
+            translation: typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation: unknown }).translation === 'string' ? (response as { translation: string }).translation : '',
+            confidence: typeof response === 'object' && response !== null && 'confidence' in response && typeof (response as { confidence: unknown }).confidence === 'number' ? (response as { confidence: number }).confidence : 0.9,
+            alternatives: typeof response === 'object' && response !== null && 'alternatives' in response ? (response as { alternatives: string[] }).alternatives || [] : [],
+            explanation: typeof response === 'object' && response !== null && 'explanation' in response ? (response as { explanation: string }).explanation : '',
+            domain_notes: typeof response === 'object' && response !== null && 'domain_notes' in response ? (response as { domain_notes: string }).domain_notes : '',
             domain: domain || 'general',
             context: context || null,
             source: "new_translation"
@@ -606,44 +643,47 @@ To continue this dialog, use the \`translate_content\` tool again with:
     }
     
     // Return formatted result
+    let markdown = `\n## Translation Result\n\n`;
+    markdown += `**Source (${sourceLanguage}):** "${content}"\n`;
+    markdown += `**Target (${targetLanguage}):** "${typeof response === 'object' && response !== null && 'translation' in response && typeof (response as { translation: unknown }).translation === 'string' ? (response as { translation: string }).translation : ''}"\n`;
+    markdown += `\n**Confidence:** ${(typeof response === 'object' && response !== null && 'confidence' in response && typeof (response as { confidence: unknown }).confidence === 'number' ? (response as { confidence: number }).confidence : 0.9) * 100}%\n`;
+    if (domain) markdown += `**Domain:** ${domain}\n`;
+    if (context) markdown += `**Context:** ${context}\n`;
+    markdown += `\n`;
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'alternatives' in response &&
+      Array.isArray((response as { alternatives: unknown }).alternatives) &&
+      (response as { alternatives: unknown[] }).alternatives.length > 0
+    ) {
+      markdown += `### Alternative Translations:\n`;
+      markdown += (response as { alternatives: string[] }).alternatives.map((alt: string) => `- "${alt}"`).join('\n') + '\n';
+    }
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'explanation' in response &&
+      typeof (response as { explanation: unknown }).explanation === 'string' &&
+      (response as { explanation: string }).explanation
+    ) {
+      markdown += `### Translation Notes:\n`;
+      markdown += `${(response as { explanation: string }).explanation}\n`;
+    }
+    if (
+      typeof response === 'object' &&
+      response !== null &&
+      'domain_notes' in response &&
+      typeof (response as { domain_notes: unknown }).domain_notes === 'string' &&
+      (response as { domain_notes: string }).domain_notes
+    ) {
+      markdown += `### Domain-Specific Notes:\n`;
+      markdown += `${(response as { domain_notes: string }).domain_notes}\n`;
+    }
     return {
       content: [{
         type: "text" as const,
-        text: `## Translation Result
-
-**Source (${sourceLanguage}):** "${content}"
-**Target (${targetLanguage}):** "${response.translation}"
-
-**Confidence:** ${(response.confidence * 100).toFixed(0)}%
-${domain ? `**Domain:** ${domain}` : ''}
-${context ? `**Context:** ${context}` : ''}
-
-${response.alternatives?.length > 0 ? `
-### Alternative Translations:
-${response.alternatives.map((alt: string) => `- "${alt}"`).join('\n')}
-` : ''}
-
-${response.explanation ? `
-### Translation Notes:
-${response.explanation}
-` : ''}
-
-${response.domain_notes ? `
-### Domain-Specific Notes:
-${response.domain_notes}
-` : ''}
-
-${similarTranslations.length > 0 ? `
-### Translation Memory:
-This translation has been saved to memory. Similar translations found:
-${similarTranslations.slice(0, 3).map(t => 
-  `- "${t.sourceText}" → "${t.targetText}" (used ${t.usageCount} times)`
-).join('\n')}
-` : `
-### Translation Memory:
-This is a new translation that has been saved to memory for future reference.
-`}
-`
+        text: markdown
       }]
     };
     

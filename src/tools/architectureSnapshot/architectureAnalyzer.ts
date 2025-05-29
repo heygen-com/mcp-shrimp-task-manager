@@ -46,10 +46,10 @@ export class ArchitectureAnalyzer {
     // In a full implementation, these would have their own collectors
     const dependencies = await this.analyzeDependencies(projectPath);
     const configuration = await this.analyzeConfiguration(projectPath);
-    const codeOrganization = await this.analyzeCodeOrganization(projectPath, structure);
-    const apiSurface = await this.analyzeAPISurface(projectPath);
-    const testing = await this.analyzeTesting(projectPath);
-    const documentation = await this.analyzeDocumentation(projectPath);
+    const codeOrganization = await this.analyzeCodeOrganization();
+    const apiSurface = await this.analyzeAPISurface();
+    const testing = await this.analyzeTesting();
+    const documentation = await this.analyzeDocumentation();
     const metrics = await this.calculateMetrics(structure);
 
     const snapshot: ProjectSnapshot = {
@@ -181,7 +181,7 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private async analyzeCodeOrganization(projectPath: string, structure: any): Promise<CodeOrganization> {
+  private async analyzeCodeOrganization(): Promise<CodeOrganization> {
     const entryPoints = [];
     const layers = [];
 
@@ -197,7 +197,7 @@ export class ArchitectureAnalyzer {
 
     for (const entry of commonEntryPoints) {
       try {
-        await fs.access(path.join(projectPath, entry.path));
+        await fs.access(path.join(process.cwd(), entry.path));
         entryPoints.push(entry);
       } catch {
         // File doesn't exist
@@ -205,7 +205,7 @@ export class ArchitectureAnalyzer {
     }
 
     // Detect architectural layers based on directory structure
-    const srcPath = path.join(projectPath, 'src');
+    const srcPath = path.join(process.cwd(), 'src');
     try {
       const srcDirs = await fs.readdir(srcPath, { withFileTypes: true });
       
@@ -243,18 +243,18 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private async analyzeAPISurface(projectPath: string): Promise<APISurface> {
+  private async analyzeAPISurface(): Promise<APISurface> {
     // This is a placeholder - in a real implementation,
     // we would parse route files, OpenAPI specs, etc.
     return {};
   }
 
-  private async analyzeTesting(projectPath: string): Promise<TestingInfo> {
+  private async analyzeTesting(): Promise<TestingInfo> {
     let framework = '';
-    let testFiles = 0;
+    const testFiles = 0;
 
     // Detect test framework
-    const packageJsonPath = path.join(projectPath, 'package.json');
+    const packageJsonPath = path.join(process.cwd(), 'package.json');
     try {
       const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
       const allDeps = { ...packageJson.dependencies, ...packageJson.devDependencies };
@@ -269,7 +269,6 @@ export class ArchitectureAnalyzer {
     }
 
     // Count test files (simplified)
-    const testPatterns = ['*.test.ts', '*.spec.ts', '*.test.js', '*.spec.js'];
     // In a real implementation, we would recursively search for these patterns
 
     return {
@@ -280,7 +279,7 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private async analyzeDocumentation(projectPath: string): Promise<DocumentationInfo> {
+  private async analyzeDocumentation(): Promise<DocumentationInfo> {
     const readmeFiles = [];
     
     // Check for README files
@@ -288,7 +287,7 @@ export class ArchitectureAnalyzer {
     
     for (const pattern of readmePatterns) {
       try {
-        const filePath = path.join(projectPath, pattern);
+        const filePath = path.join(process.cwd(), pattern);
         await fs.access(filePath);
         readmeFiles.push({
           path: pattern,
@@ -306,12 +305,20 @@ export class ArchitectureAnalyzer {
     };
   }
 
-  private async calculateMetrics(structure: any): Promise<ProjectMetrics> {
-    // This is simplified - in a real implementation,
-    // we would analyze all files to get accurate metrics
+  private async calculateMetrics(structure: unknown): Promise<ProjectMetrics> {
+    if (typeof structure === 'object' && structure !== null && 'totalFiles' in structure && typeof (structure as { totalFiles: unknown }).totalFiles === 'number') {
+      return {
+        totalFiles: (structure as { totalFiles: number }).totalFiles,
+        totalLines: 0, // Would need to count lines in all files
+        codeLines: 0,
+        commentLines: 0,
+        blankLines: 0
+      };
+    }
+    // Fallback if structure is not as expected
     return {
-      totalFiles: structure.totalFiles,
-      totalLines: 0, // Would need to count lines in all files
+      totalFiles: 0,
+      totalLines: 0,
       codeLines: 0,
       commentLines: 0,
       blankLines: 0

@@ -58,7 +58,7 @@ export function getListTasksPrompt(params: ListTasksPromptParams): string {
   }
 
   let taskDetails = "";
-  let taskDetailsTemplate = loadPromptFromTemplate("listTasks/taskDetails.md");
+  const taskDetailsTemplate = loadPromptFromTemplate("listTasks/taskDetails.md");
   // 添加每個狀態下的詳細任務
   for (const statusType of Object.values(TaskStatus)) {
     const tasksWithStatus = tasks[statusType] || [];
@@ -89,7 +89,7 @@ export function getListTasksPrompt(params: ListTasksPromptParams): string {
   }
 
   const indexTemplate = loadPromptFromTemplate("listTasks/index.md");
-  let prompt = generatePrompt(indexTemplate, {
+  const prompt = generatePrompt(indexTemplate, {
     statusCount: statusCounts,
     taskDetailsTemplate: taskDetails,
   });

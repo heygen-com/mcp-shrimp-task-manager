@@ -20,6 +20,39 @@ export const architectureSnapshotSchema = z.object({
   }).optional()
 }).describe('Architecture snapshot tool - analyze and document codebase structure');
 
+// Define the Snapshot type for elements in the 'snapshots' array
+interface Snapshot {
+  timestamp: string;
+  // Add other properties as needed
+  [key: string]: unknown;
+}
+
+interface SnapshotMetadata {
+  version: string;
+  createdAt: string;
+  snapshots: Snapshot[];
+  latest?: string;
+}
+
+function isSnapshot(obj: unknown): obj is Snapshot {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'timestamp' in obj && typeof (obj as { timestamp: unknown }).timestamp === 'string'
+  );
+}
+
+function isSnapshotMetadata(obj: unknown): obj is SnapshotMetadata {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'version' in obj && typeof (obj as { version: unknown }).version === 'string' &&
+    'createdAt' in obj && typeof (obj as { createdAt: unknown }).createdAt === 'string' &&
+    'snapshots' in obj && Array.isArray((obj as { snapshots: unknown }).snapshots) &&
+    ((obj as { snapshots: unknown[] }).snapshots.every(isSnapshot))
+  );
+}
+
 export async function architectureSnapshot(params: z.infer<typeof architectureSnapshotSchema>) {
   const analyzer = new ArchitectureAnalyzer();
   
@@ -83,15 +116,19 @@ async function detectExistingSnapshots(params: z.infer<typeof architectureSnapsh
     
     // Check for metadata.json (our tool's signature file)
     const metadataPath = path.join(projectSnapshotDir, 'metadata.json');
-    const metadata = await loadMetadata(metadataPath);
+    const metadataRaw = await loadMetadata(metadataPath);
+    const metadata: SnapshotMetadata = isSnapshotMetadata(metadataRaw)
+      ? metadataRaw
+      : { version: "1.0", createdAt: new Date().toISOString(), snapshots: [] };
     
     if (metadata.snapshots && metadata.snapshots.length > 0) {
       const latestSnapshot = metadata.snapshots[metadata.snapshots.length - 1];
-      const snapshotDate = new Date(latestSnapshot.timestamp).toLocaleString();
-      
-      return {
-        hasExisting: true,
-        message: `📊 Found existing architecture snapshots for project "${projectId}"
+      if (isSnapshot(latestSnapshot)) {
+        const snapshotDate = new Date(latestSnapshot.timestamp).toLocaleString();
+        
+        return {
+          hasExisting: true,
+          message: `📊 Found existing architecture snapshots for project "${projectId}"
 
 **Latest snapshot:** ${snapshotDate}
 **Snapshot ID:** ${latestSnapshot.id}
@@ -109,9 +146,10 @@ If you want to start fresh instead, you can:
 2. Then run: \`architecture_snapshot action=create projectId=${projectId}\`
 
 Or view existing snapshots: \`architecture_snapshot action=list projectId=${projectId}\``
-      };
+        };
+      }
     }
-  } catch (error) {
+  } catch {
     // Directory doesn't exist or no metadata - this is fine, proceed with create
   }
   
@@ -141,10 +179,13 @@ async function createSnapshot(analyzer: ArchitectureAnalyzer, params: z.infer<ty
   
   // Save metadata
   const metadataPath = path.join(SNAPSHOTS_DIR, projectId, 'metadata.json');
-  const metadata = await loadMetadata(metadataPath);
+  const metadataRaw = await loadMetadata(metadataPath);
+  const metadata: SnapshotMetadata = isSnapshotMetadata(metadataRaw)
+    ? metadataRaw
+    : { version: "1.0", createdAt: new Date().toISOString(), snapshots: [] };
   metadata.snapshots.push({
     id: snapshot.id,
-    timestamp: snapshot.timestamp,
+    timestamp: snapshot.timestamp instanceof Date ? snapshot.timestamp.toISOString() : snapshot.timestamp,
     version: snapshot.version,
     path: snapshotDir
   });
@@ -181,7 +222,10 @@ async function updateSnapshot(analyzer: ArchitectureAnalyzer, params: z.infer<ty
   
   // Load previous snapshot metadata
   const metadataPath = path.join(SNAPSHOTS_DIR, projectId, 'metadata.json');
-  const metadata = await loadMetadata(metadataPath);
+  const metadataRaw = await loadMetadata(metadataPath);
+  const metadata: SnapshotMetadata = isSnapshotMetadata(metadataRaw)
+    ? metadataRaw
+    : { version: "1.0", createdAt: new Date().toISOString(), snapshots: [] };
   
   if (metadata.snapshots.length === 0) {
     return await createSnapshot(analyzer, params);
@@ -189,43 +233,44 @@ async function updateSnapshot(analyzer: ArchitectureAnalyzer, params: z.infer<ty
   
   // Get the latest snapshot
   const latestSnapshot = metadata.snapshots[metadata.snapshots.length - 1];
-  const previousSnapshotPath = path.join(latestSnapshot.path, 'architecture.json');
-  const previousSnapshot: ProjectSnapshot = JSON.parse(await fs.readFile(previousSnapshotPath, 'utf-8'));
-  
-  // Create new snapshot
-  const newSnapshot = await analyzer.analyze(projectPath, {
-    depth: params.options?.depth,
-    includeNodeModules: params.options?.includeNodeModules
-  });
-  
-  // Create output directory
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const snapshotDir = path.join(SNAPSHOTS_DIR, projectId, timestamp);
-  await fs.mkdir(snapshotDir, { recursive: true });
-  
-  // Generate report
-  const reportPath = await analyzer.generateReport(newSnapshot, snapshotDir);
-  
-  // Generate comparison report
-  const comparison = await compareSnapshotObjects(previousSnapshot, newSnapshot);
-  const comparisonPath = path.join(snapshotDir, 'comparison.md');
-  await fs.writeFile(comparisonPath, comparison);
-  
-  // Update metadata
-  metadata.snapshots.push({
-    id: newSnapshot.id,
-    timestamp: newSnapshot.timestamp,
-    version: newSnapshot.version,
-    path: snapshotDir,
-    previousId: previousSnapshot.id
-  });
-  metadata.latest = newSnapshot.id;
-  await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-  
-  return {
-    content: [{
-      type: 'text' as const,
-      text: `✅ Architecture snapshot updated successfully!
+  if (isSnapshot(latestSnapshot)) {
+    const previousSnapshotPath = path.join(String(latestSnapshot.path), 'architecture.json');
+    const previousSnapshot: ProjectSnapshot = JSON.parse(await fs.readFile(previousSnapshotPath, 'utf-8'));
+    
+    // Create new snapshot
+    const newSnapshot = await analyzer.analyze(projectPath, {
+      depth: params.options?.depth,
+      includeNodeModules: params.options?.includeNodeModules
+    });
+    
+    // Create output directory
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const snapshotDir = path.join(SNAPSHOTS_DIR, projectId, timestamp);
+    await fs.mkdir(snapshotDir, { recursive: true });
+    
+    // Generate report
+    const reportPath = await analyzer.generateReport(newSnapshot, snapshotDir);
+    
+    // Generate comparison report
+    const comparison = await compareSnapshotObjects(previousSnapshot, newSnapshot);
+    const comparisonPath = path.join(snapshotDir, 'comparison.md');
+    await fs.writeFile(comparisonPath, comparison);
+    
+    // Update metadata
+    metadata.snapshots.push({
+      id: newSnapshot.id,
+      timestamp: newSnapshot.timestamp instanceof Date ? newSnapshot.timestamp.toISOString() : newSnapshot.timestamp,
+      version: newSnapshot.version,
+      path: snapshotDir,
+      previousId: previousSnapshot.id
+    });
+    metadata.latest = newSnapshot.id;
+    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `✅ Architecture snapshot updated successfully!
 
 **Project:** ${newSnapshot.projectName}
 **New Snapshot ID:** ${newSnapshot.id}
@@ -241,6 +286,14 @@ ${comparison.substring(0, 500)}...
 - Comparison Report: ${comparisonPath}
 
 View the comparison report for detailed changes.`
+      }]
+    };
+  }
+  
+  return {
+    content: [{
+      type: 'text' as const,
+      text: '❌ Invalid snapshot format'
     }]
   };
 }
@@ -277,7 +330,10 @@ async function listSnapshots(params: z.infer<typeof architectureSnapshotSchema>)
       for (const project of projects) {
         const metadataPath = path.join(SNAPSHOTS_DIR, project, 'metadata.json');
         try {
-          const metadata = await loadMetadata(metadataPath);
+          const metadataRaw = await loadMetadata(metadataPath);
+          const metadata: SnapshotMetadata = isSnapshotMetadata(metadataRaw)
+            ? metadataRaw
+            : { version: "1.0", createdAt: new Date().toISOString(), snapshots: [] };
           output += `## ${project}\n`;
           output += `- Snapshots: ${metadata.snapshots.length}\n`;
           output += `- Latest: ${metadata.latest || 'None'}\n\n`;
@@ -303,7 +359,10 @@ async function listSnapshots(params: z.infer<typeof architectureSnapshotSchema>)
   } else {
     // List snapshots for specific project
     const metadataPath = path.join(SNAPSHOTS_DIR, projectId, 'metadata.json');
-    const metadata = await loadMetadata(metadataPath);
+    const metadataRaw = await loadMetadata(metadataPath);
+    const metadata: SnapshotMetadata = isSnapshotMetadata(metadataRaw)
+      ? metadataRaw
+      : { version: "1.0", createdAt: new Date().toISOString(), snapshots: [] };
     
     let output = `# Architecture Snapshots for ${projectId}\n\n`;
     output += `Total Snapshots: ${metadata.snapshots.length}\n\n`;
@@ -327,7 +386,7 @@ async function listSnapshots(params: z.infer<typeof architectureSnapshotSchema>)
   }
 }
 
-async function loadMetadata(metadataPath: string): Promise<any> {
+async function loadMetadata(metadataPath: string): Promise<unknown> {
   try {
     const content = await fs.readFile(metadataPath, 'utf-8');
     return JSON.parse(content);

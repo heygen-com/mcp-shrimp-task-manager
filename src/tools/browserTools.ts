@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import axios from 'axios';
-// @ts-ignore - TS compiler requires no extension here, despite NodeNext rule
+// @ts-expect-error - TS compiler requires no extension here, despite NodeNext rule
 import type { Tool } from '../types';
 
-const DEFAULT_MAX_LOGS = 25;
 const SERVER_BASE_URL = 'http://localhost:9876';
 
 // Define the schema for the tool's input (no parameters)
@@ -13,7 +12,7 @@ export const checkBrowserLogsSchema = z.object({});
 interface LogEntry {
   type: string;
   timestamp: number;
-  data: any;
+  data: unknown;
   tabId?: number;
   url?: string;
   title?: string;
@@ -62,9 +61,9 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
           ],
         };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching tabs:', error);
-      const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
+      const message = error instanceof Error && typeof (error as { response?: { status?: number } }).response === 'object' && (error as { response?: { status?: number } }).response?.status === 404
         ? `DevTools Bridge server not found at ${SERVER_BASE_URL}/tabs.`
         : `Error fetching tabs: ${error instanceof Error ? error.message : String(error)}`;
       return {
@@ -87,7 +86,7 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
       const logsResponse = await axios.get<LogEntry[]>(`${SERVER_BASE_URL}/logs`, {
         params: { tabId: targetTabId },
       });
-      let logs = logsResponse.data;
+      const logs = logsResponse.data;
 
       if (!Array.isArray(logs)) {
           return {
@@ -105,8 +104,8 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
       try {
         await axios.delete(`${SERVER_BASE_URL}/logs`, { params: { tabId: targetTabId } });
         console.log(`Successfully requested deletion of logs from server for tab ID: ${targetTabId}`);
-      } catch (deleteError: any) {
-        console.error(`Attempt to delete logs from server for tab ID ${targetTabId} failed: ${deleteError.message || deleteError}`);
+      } catch (deleteError: unknown) {
+        console.error(`Attempt to delete logs from server for tab ID ${targetTabId} failed: ${(deleteError as Error).message || deleteError}`);
         // Log the error, but proceed to return the fetched logs.
       }
 
@@ -117,12 +116,12 @@ export const checkBrowserLogs: Tool<typeof checkBrowserLogsSchema> = {
         let messageText = '';
         if (typeof log.data === 'string') {
           messageText = log.data;
-        } else if (log.data && typeof log.data.message === 'string') {
-          messageText = log.data.message;
-        } else if (log.data && typeof log.data.text === 'string') {
-          messageText = log.data.text;
-        } else if (log.data && Array.isArray(log.data.args)) { // Check for console.log style args
-            messageText = log.data.args.join(' ');
+        } else if (log.data && typeof (log.data as { message?: unknown }).message === 'string') {
+          messageText = (log.data as { message: string }).message;
+        } else if (log.data && typeof (log.data as { text?: unknown }).text === 'string') {
+          messageText = (log.data as { text: string }).text;
+        } else if (log.data && Array.isArray((log.data as { args?: unknown[] }).args)) { // Check for console.log style args
+            messageText = (log.data as { args: unknown[] }).args.join(' ');
         }
 
 
@@ -168,9 +167,9 @@ ${JSON.stringify(returnedLogs, null, 2)}`,
         ],
       };
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Error fetching logs for tab ${targetTabId}:`, error);
-       const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
+       const message = error instanceof Error && typeof (error as { response?: { status?: number } }).response === 'object' && (error as { response?: { status?: number } }).response?.status === 404
         ? `Log endpoint not found for tab ${targetTabId}. Is the server running and the tab ID correct?`
         : `Error fetching logs for tab ${targetTabId}: ${error instanceof Error ? error.message : String(error)}`;
        return {
@@ -235,9 +234,9 @@ export const listBrowserTabs: Tool<typeof listBrowserTabsSchema> = {
           },
         ],
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching tabs:', error);
-      const message = error instanceof Error && 'response' in error && (error as any).response?.status === 404
+      const message = error instanceof Error && typeof (error as { response?: { status?: number } }).response === 'object' && (error as { response?: { status?: number } }).response?.status === 404
         ? `DevTools Bridge server not found at ${SERVER_BASE_URL}/cdp-tabs.`
         : `Error fetching tabs: ${error instanceof Error ? error.message : String(error)}`;
       return {

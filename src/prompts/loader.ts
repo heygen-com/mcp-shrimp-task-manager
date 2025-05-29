@@ -55,7 +55,7 @@ export function loadPrompt(basePrompt: string, promptKey: string): string {
  */
 export function generatePrompt(
   promptTemplate: string,
-  params: Record<string, any> = {}
+  params: Record<string, unknown> = {}
 ): string {
   // 使用簡單的模板替換方法，將 {paramName} 替換為對應的參數值
   let result = promptTemplate;

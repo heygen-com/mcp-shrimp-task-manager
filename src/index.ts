@@ -8,7 +8,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import getPort from "get-port";
 import path from "path";
 import fs from "fs";
@@ -155,7 +155,7 @@ async function main() {
               }
             });
           }
-        } catch (watchError) {}
+        } catch { /* intentionally left blank */ }
       });
 
       // 將 URL 寫入 ebGUI.md
@@ -163,7 +163,7 @@ async function main() {
         const websiteUrl = `[Task Manager UI](http://localhost:${port})`;
         const websiteFilePath = path.join(DATA_DIR, "WebGUI.md");
         await fsPromises.writeFile(websiteFilePath, websiteUrl, "utf-8");
-      } catch (error) {}
+      } catch { /* intentionally left blank */ }
 
       // 設置進程終止事件處理 (確保移除 watcher)
       const shutdownHandler = async () => {
@@ -321,8 +321,8 @@ async function main() {
               result = await projectContext(parsedArgs);
               break;
             case "log_data_dir":
-              parsedArgs = await logDataDirSchema.parseAsync(request.params.arguments || {});
-              result = await logDataDir(parsedArgs);
+              await logDataDirSchema.parseAsync(request.params.arguments || {});
+              result = await logDataDir();
               break;
             case "consult_expert":
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
@@ -350,8 +350,8 @@ async function main() {
               result = await analyzePR(parsedArgs);
               break;
             case "check_env":
-              parsedArgs = await checkEnvSchema.parseAsync(request.params.arguments || {});
-              result = await checkEnv(parsedArgs);
+              await checkEnvSchema.parseAsync(request.params.arguments || {});
+              result = await checkEnv();
               break;
             case "translate_content":
               parsedArgs = await translateContentSchema.parseAsync(request.params.arguments);

@@ -105,12 +105,12 @@ export class FileSystemCollector {
         if (entry.isDirectory()) {
           const childNode = await this.scanDirectory(fullPath, depth + 1, options);
           children.push(childNode);
-          this.trackNamingPattern(entry.name, 'directory');
+          this.trackNamingPattern(entry.name);
         } else if (entry.isFile()) {
           const fileNode = await this.createFileNode(fullPath, entry.name);
           children.push(fileNode);
           this.fileCount++;
-          this.trackNamingPattern(entry.name, 'file');
+          this.trackNamingPattern(entry.name);
         }
       }
 
@@ -121,8 +121,8 @@ export class FileSystemCollector {
         }
         return a.name.localeCompare(b.name);
       });
-    } catch (error) {
-      console.error(`Error scanning directory ${dirPath}:`, error);
+    } catch {
+      // intentionally left blank
     }
 
     return node;
@@ -156,8 +156,8 @@ export class FileSystemCollector {
       try {
         const content = await fs.readFile(filePath, 'utf-8');
         fileStats.lines = content.split('\n').length;
-      } catch (error) {
-        // Ignore errors reading files
+      } catch {
+        // intentionally left blank
       }
     }
 
@@ -199,7 +199,7 @@ export class FileSystemCollector {
     return textExtensions.includes(extension);
   }
 
-  private trackNamingPattern(name: string, type: 'file' | 'directory') {
+  private trackNamingPattern(name: string) {
     // Track camelCase
     if (/^[a-z][a-zA-Z0-9]*$/.test(name)) {
       this.addPattern('camelCase', name);

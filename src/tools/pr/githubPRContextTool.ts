@@ -66,8 +66,8 @@ interface PRContextData {
 }
 
 // Helper function to make authenticated GitHub API requests
-async function githubApiRequest(url: string, acceptHeader: string = "application/vnd.github.v3+json") {
-  const headers: any = {
+async function githubApiRequest(url: string, acceptHeader: string = "application/vnd.github.v3+json"): Promise<unknown> {
+  const headers: Record<string, string> = {
     "Accept": acceptHeader,
     "User-Agent": "MCP-Shrimp-Task-Manager",
   };
@@ -80,14 +80,15 @@ async function githubApiRequest(url: string, acceptHeader: string = "application
     const response = await axios.get(url, { headers });
     return response.data;
   } catch (error) {
-    if (error instanceof Error && 'response' in error) {
-      const axiosError = error as any;
+    if (typeof error === 'object' && error !== null && 'response' in error) {
+      const axiosError = error as { response?: { status?: number; statusText?: string; headers?: Record<string, unknown> }; message?: string };
       const status = axiosError.response?.status;
-      
       if (status === 401) {
         throw new Error(`GitHub API authentication failed. Please check your GITHUB_TOKEN is valid.`);
       } else if (status === 403) {
-        const rateLimitRemaining = axiosError.response?.headers['x-ratelimit-remaining'];
+        const rateLimitRemaining = axiosError.response?.headers && typeof axiosError.response.headers['x-ratelimit-remaining'] === 'string'
+          ? axiosError.response.headers['x-ratelimit-remaining']
+          : undefined;
         if (rateLimitRemaining === '0') {
           throw new Error(`GitHub API rate limit exceeded. Please set a valid GITHUB_TOKEN to increase limits.`);
         }
@@ -95,7 +96,6 @@ async function githubApiRequest(url: string, acceptHeader: string = "application
       } else if (status === 404) {
         throw new Error(`Resource not found. Please check the PR URL is correct and you have access to the repository.`);
       }
-      
       throw new Error(`GitHub API error (${status}): ${axiosError.response?.statusText || axiosError.message}`);
     }
     throw error;
@@ -113,13 +113,11 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
 
     // Fetch PR data
     const prApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/pulls/${repoInfo.prNumber}`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const prData = await githubApiRequest(prApiUrl) as any;
+    const prData = await githubApiRequest(prApiUrl) as Record<string, unknown>;
 
     // Fetch PR files
     const filesApiUrl = `${prApiUrl}/files`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filesData = (await githubApiRequest(filesApiUrl)) as any[];
+    const filesData = (await githubApiRequest(filesApiUrl)) as Array<Record<string, unknown>>;
 
     // Fetch review comments
     const reviewCommentsApiUrl = `${prApiUrl}/comments`;
@@ -134,20 +132,26 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
     const reviewsData = await githubApiRequest(reviewsApiUrl);
 
     // Fetch status checks
-    const statusApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/commits/${prData.head.sha}/status`;
-    const statusData = await githubApiRequest(statusApiUrl);
+    let statusData: unknown = undefined;
+    if (prData.head && typeof prData.head === 'object' && 'sha' in prData.head) {
+      const statusApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/commits/${(prData.head as { sha: string }).sha}/status`;
+      statusData = await githubApiRequest(statusApiUrl);
+    }
 
     // Fetch check runs (newer GitHub Actions checks)
-    const checkRunsApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/commits/${prData.head.sha}/check-runs`;
-    const checkRunsData = await githubApiRequest(checkRunsApiUrl);
+    let checkRunsData: unknown = undefined;
+    if (prData.head && typeof prData.head === 'object' && 'sha' in prData.head) {
+      const checkRunsApiUrl = `https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}/commits/${(prData.head as { sha: string }).sha}/check-runs`;
+      checkRunsData = await githubApiRequest(checkRunsApiUrl);
+    }
 
     // Process the data
     const contextData = processGitHubData(
       prData,
       filesData,
-      reviewCommentsData as any[],
-      issueCommentsData as any[],
-      reviewsData as any[],
+      reviewCommentsData as Array<Record<string, unknown>>,
+      issueCommentsData as Array<Record<string, unknown>>,
+      reviewsData as Array<Record<string, unknown>>,
       statusData,
       checkRunsData,
       prUrl
@@ -184,35 +188,34 @@ export async function githubPRContext({ prUrl }: z.infer<typeof githubPRContextS
 }
 
 // Process GitHub API data into our structured format
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processGitHubData(
-  prData: any,
-  filesData: any[],
-  reviewCommentsData: any[],
-  issueCommentsData: any[],
-  reviewsData: any[],
-  statusData: any,
-  checkRunsData: any,
+  prData: Record<string, unknown>,
+  filesData: Array<Record<string, unknown>>,
+  reviewCommentsData: Array<Record<string, unknown>>,
+  issueCommentsData: Array<Record<string, unknown>>,
+  reviewsData: Array<Record<string, unknown>>,
+  statusData: unknown,
+  checkRunsData: unknown,
   prUrl: string
 ): PRContextData {
   // Extract PR metadata
   const pr_metadata: PRMetadata = {
-    title: prData.title,
-    description: prData.body || "",
-    created_at: prData.created_at,
-    status: prData.state,
-    source_branch: prData.head.ref,
-    target_branch: prData.base.ref,
-    pr_number: prData.number,
+    title: prData.title as string,
+    description: prData.body as string || "",
+    created_at: prData.created_at as string,
+    status: prData.state as string,
+    source_branch: (prData.head && typeof prData.head === 'object' && 'ref' in prData.head) ? (prData.head as { ref: string }).ref : '',
+    target_branch: (prData.base && typeof prData.base === 'object' && 'ref' in prData.base) ? (prData.base as { ref: string }).ref : '',
+    pr_number: prData.number as number,
     pr_url: prUrl,
     author: {
-      username: prData.user.login,
-      profile_url: prData.user.html_url,
+      username: (prData.user && typeof prData.user === 'object' && 'login' in prData.user) ? (prData.user as { login: string }).login : '',
+      profile_url: (prData.user && typeof prData.user === 'object' && 'html_url' in prData.user) ? (prData.user as { html_url: string }).html_url : '',
     },
   };
 
   // Extract changed files
-  const changed_files = filesData.map(file => file.filename);
+  const changed_files = filesData.map(file => file.filename as string);
 
   // Process review comments into threads
   const reviewThreads = processReviewThreads(reviewCommentsData);
@@ -232,10 +235,10 @@ function processGitHubData(
 
   // Get diffs for files with blockers
   const file_diffs_with_blockers = filesData
-    .filter(file => filesWithBlockers.has(file.filename))
+    .filter(file => filesWithBlockers.has(file.filename as string))
     .map(file => ({
-      filename: file.filename,
-      diff: file.patch || "",
+      filename: file.filename as string,
+      diff: (file.patch as string) || "",
     }));
 
   // Process required checks
@@ -255,12 +258,11 @@ function processGitHubData(
 }
 
 // Process review comments into threads
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function processReviewThreads(reviewCommentsData: any[]): ReviewThread[] {
+function processReviewThreads(reviewCommentsData: Array<Record<string, unknown>>): ReviewThread[] {
   const threadsMap = new Map<string, ReviewThread>();
 
   reviewCommentsData.forEach(comment => {
-    const threadId = comment.in_reply_to_id ? comment.in_reply_to_id.toString() : comment.id.toString();
+    const threadId = comment.in_reply_to_id ? String(comment.in_reply_to_id) : String(comment.id);
     
     if (!threadsMap.has(threadId)) {
       threadsMap.set(threadId, {
@@ -278,12 +280,12 @@ function processReviewThreads(reviewCommentsData: any[]): ReviewThread[] {
     }
 
     thread.comments.push({
-      author: comment.user.login,
-      profile_url: comment.user.html_url,
-      timestamp: comment.created_at,
-      body: comment.body,
-      file: comment.path,
-      line: comment.line || comment.original_line,
+      author: (comment.user as { login: string }).login,
+      profile_url: (comment.user as { html_url: string }).html_url,
+      timestamp: comment.created_at as string,
+      body: comment.body as string,
+      file: comment.path as string,
+      line: (comment.line as number) || (comment.original_line as number),
     });
   });
 
@@ -291,34 +293,30 @@ function processReviewThreads(reviewCommentsData: any[]): ReviewThread[] {
 }
 
 // Process required checks
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function processRequiredChecks(statusData: any, checkRunsData: any): RequiredCheck[] {
+function processRequiredChecks(statusData: unknown, checkRunsData: unknown): RequiredCheck[] {
   const checks: RequiredCheck[] = [];
 
   // Process commit statuses (older CI systems)
-  if (statusData.statuses) {
-    statusData.statuses.forEach((status: any) => {
-      // Only include if it's a required context (this is a simplification - in reality, 
-      // we'd need to check branch protection rules)
-      if (status.context) {
+  if (statusData && typeof statusData === 'object' && 'statuses' in statusData && Array.isArray((statusData as { statuses: unknown[] }).statuses)) {
+    (statusData as { statuses: unknown[] }).statuses.forEach((status) => {
+      if (status && typeof status === 'object' && 'context' in status && 'state' in status) {
         checks.push({
-          name: status.context,
-          status: mapStatusState(status.state),
-          details_url: status.target_url,
+          name: (status as { context: string }).context,
+          status: mapStatusState((status as { state: string }).state),
+          details_url: 'target_url' in status ? (status as { target_url?: string }).target_url : undefined,
         });
       }
     });
   }
 
   // Process check runs (GitHub Actions and newer integrations)
-  if (checkRunsData.check_runs) {
-    checkRunsData.check_runs.forEach((checkRun: any) => {
-      // Only include required checks (again, simplified - would need branch protection info)
-      if (checkRun.name) {
+  if (checkRunsData && typeof checkRunsData === 'object' && 'check_runs' in checkRunsData && Array.isArray((checkRunsData as { check_runs: unknown[] }).check_runs)) {
+    (checkRunsData as { check_runs: unknown[] }).check_runs.forEach((checkRun) => {
+      if (checkRun && typeof checkRun === 'object' && 'name' in checkRun && 'status' in checkRun) {
         checks.push({
-          name: checkRun.name,
-          status: mapCheckRunStatus(checkRun.status, checkRun.conclusion),
-          details_url: checkRun.html_url,
+          name: (checkRun as { name: string }).name,
+          status: mapCheckRunStatus((checkRun as { status: string }).status, 'conclusion' in checkRun ? (checkRun as { conclusion: string | null }).conclusion : null),
+          details_url: 'html_url' in checkRun ? (checkRun as { html_url?: string }).html_url : undefined,
         });
       }
     });
@@ -363,8 +361,7 @@ function mapCheckRunStatus(status: string, conclusion: string | null): "success"
 }
 
 // Process reviewer statuses
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function processReviewerStatuses(reviewsData: any[]): ReviewerStatus[] {
+function processReviewerStatuses(reviewsData: Array<Record<string, unknown>>): ReviewerStatus[] {
   // Temporary interface for storing reviewer data with timestamp
   interface ReviewerWithTimestamp extends ReviewerStatus {
     timestamp: string;
@@ -373,21 +370,26 @@ function processReviewerStatuses(reviewsData: any[]): ReviewerStatus[] {
   const reviewerMap = new Map<string, ReviewerWithTimestamp>();
 
   reviewsData.forEach(review => {
-    const username = review.user.login;
+    const username = (review.user as { login: string }).login;
     
     // Keep only the most recent review from each reviewer
-    if (!reviewerMap.has(username) || new Date(review.submitted_at) > new Date(reviewerMap.get(username)!.timestamp)) {
+    if (!reviewerMap.has(username) || new Date(review.submitted_at as string) > new Date(reviewerMap.get(username)!.timestamp)) {
       reviewerMap.set(username, {
         username: username,
-        profile_url: review.user.html_url,
-        status: mapReviewState(review.state),
-        timestamp: review.submitted_at,
+        profile_url: (review.user as { html_url: string }).html_url,
+        status: mapReviewState(review.state as string),
+        timestamp: review.submitted_at as string,
       });
     }
   });
 
   // Remove timestamp and return array
-  return Array.from(reviewerMap.values()).map(({ timestamp, ...reviewer }) => reviewer);
+  return Array.from(reviewerMap.values()).map((reviewer) => {
+    // Remove the timestamp property from the reviewer object
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { timestamp, ...rest } = reviewer;
+    return rest;
+  });
 }
 
 // Map GitHub review states to our format

@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
 /*
 // 確保獲取專案資料夾路徑

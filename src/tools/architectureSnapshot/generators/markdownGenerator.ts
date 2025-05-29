@@ -17,9 +17,9 @@ export class MarkdownGenerator {
       this.generateDocumentation(snapshot),
       this.generateMetrics(snapshot),
       this.generateQuickStart(snapshot),
-      this.generateCommonTasks(snapshot),
+      this.generateCommonTasks(),
       this.generateArchitectureDecisions(snapshot),
-      this.generateContributionGuide(snapshot)
+      this.generateContributionGuide()
     ];
 
     return sections.filter(Boolean).join('\n\n');
@@ -96,7 +96,7 @@ Version: ${snapshot.version}
   private generateTechnologyStack(snapshot: ProjectSnapshot): string {
     const { metadata } = snapshot;
     
-    let content = `## Technology Stack
+    const content = `## Technology Stack
 
 ### Languages
 ${metadata.languages.map(lang => 
@@ -119,7 +119,7 @@ ${metadata.buildTools.length > 0
   private generateDirectoryStructure(snapshot: ProjectSnapshot): string {
     const { structure } = snapshot;
     
-    let content = `## Directory Structure
+    const content = `## Directory Structure
 
 \`\`\`
 ${this.renderDirectoryTree(structure.root, '', true)}
@@ -359,7 +359,7 @@ ${packageManager} ${packageManager === 'npm' ? 'run' : ''} test
 \`\`\``;
   }
 
-  private generateCommonTasks(snapshot: ProjectSnapshot): string {
+  private generateCommonTasks(): string {
     return `## Common Tasks
 
 ### Adding a New Feature
@@ -409,7 +409,7 @@ ${this.explainStateManagement(metadata)}
 ${this.explainTestingStrategy(snapshot)}`;
   }
 
-  private generateContributionGuide(snapshot: ProjectSnapshot): string {
+  private generateContributionGuide(): string {
     return `## Contribution Guide
 
 ### Code Style
@@ -479,7 +479,7 @@ ${this.explainTestingStrategy(snapshot)}`;
     const frameworks = metadata.frameworks;
     if (frameworks.length === 0) return 'software';
     
-    const types = frameworks.map((f: any) => f.type);
+    const types = frameworks.map((f: unknown) => (typeof f === 'object' && f !== null && 'type' in f ? (f as { type: string }).type : undefined));
     if (types.includes('fullstack')) return 'full-stack web application';
     if (types.includes('frontend')) return 'frontend application';
     if (types.includes('backend')) return 'backend service';
@@ -500,24 +500,27 @@ ${this.explainTestingStrategy(snapshot)}`;
       'nestjs': 'NestJS provides an enterprise-grade Node.js framework with TypeScript support.'
     };
     
-    return explanations[mainFramework.name] || `${mainFramework.name} is used as the main framework.`;
+    return explanations[(mainFramework as { name: string }).name] || `${(mainFramework as { name: string }).name} is used as the main framework.`;
   }
 
-  private explainProjectStructure(codeOrganization: any): string {
-    if (codeOrganization.layers.length === 0) {
+  private explainProjectStructure(codeOrganization: unknown): string {
+    if (!codeOrganization || typeof codeOrganization !== 'object' || !('layers' in codeOrganization)) {
       return 'The project uses a simple structure without distinct architectural layers.';
     }
-    
-    const layerNames = codeOrganization.layers.map((l: any) => l.name).join(', ');
-    return `The project is organized into ${codeOrganization.layers.length} layers: ${layerNames}. This separation of concerns improves maintainability and testability.`;
+    const layers = (codeOrganization as { layers: Array<{ name: string }> }).layers;
+    if (!Array.isArray(layers) || layers.length === 0) {
+      return 'The project uses a simple structure without distinct architectural layers.';
+    }
+    const layerNames = layers.map((l) => l.name).join(', ');
+    return `The project is organized into ${layers.length} layers: ${layerNames}. This separation of concerns improves maintainability and testability.`;
   }
 
   private explainStateManagement(metadata: ProjectMetadata): string {
     const stateLibs = ['redux', 'mobx', 'zustand', 'recoil', 'vuex', 'pinia'];
-    const framework = metadata.frameworks.find((f: any) => stateLibs.includes(f.name));
-    
-    if (framework) {
-      return `${framework.name} is used for state management, providing ${framework.name === 'redux' ? 'predictable state updates' : 'reactive state management'}.`;
+    const framework = metadata.frameworks.find((f: unknown) => typeof f === 'object' && f !== null && 'name' in f && stateLibs.includes((f as { name: string }).name));
+    if (framework && typeof framework === 'object' && framework !== null && 'name' in framework) {
+      const name = (framework as { name: string }).name;
+      return `${name} is used for state management, providing ${name === 'redux' ? 'predictable state updates' : 'reactive state management'}.`;
     }
     
     return 'State is managed using the framework\'s built-in capabilities.';

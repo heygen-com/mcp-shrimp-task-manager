@@ -35,7 +35,7 @@ export function getAnalyzeTaskPrompt(params: AnalyzeTaskPromptParams): string {
     });
   }
 
-  let prompt = generatePrompt(indexTemplate, {
+  const prompt = generatePrompt(indexTemplate, {
     summary: params.summary,
     initialConcept: params.initialConcept,
     iterationPrompt: iterationPrompt,

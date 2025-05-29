@@ -7,66 +7,6 @@
  * 3. 上下文關聯：考慮句子間的邏輯關聯
  */
 
-// 定義關鍵詞與其權重
-const KEYWORDS = {
-  // 任務相關
-  任務: 1.5,
-  功能: 1.3,
-  實現: 1.3,
-  開發: 1.3,
-  完成: 1.2,
-  執行: 1.2,
-  驗證: 1.2,
-  錯誤: 1.5,
-  問題: 1.5,
-  修復: 1.5,
-  失敗: 1.8,
-  成功: 1.5,
-  依賴: 1.2,
-  阻擋: 1.4,
-  風險: 1.4,
-  優化: 1.3,
-  改進: 1.3,
-
-  // 決策相關
-  決定: 1.6,
-  選擇: 1.5,
-  決策: 1.6,
-  方案: 1.5,
-  架構: 1.5,
-  設計: 1.4,
-  結構: 1.4,
-
-  // 技術相關
-  代碼: 1.3,
-  測試: 1.3,
-  函數: 1.2,
-  接口: 1.2,
-  類型: 1.2,
-  模塊: 1.2,
-  組件: 1.2,
-  數據: 1.3,
-  文件: 1.2,
-  路徑: 1.1,
-
-  // 系統狀態
-  狀態: 1.3,
-  啟動: 1.3,
-  停止: 1.3,
-  創建: 1.3,
-  刪除: 1.4,
-  更新: 1.3,
-  查詢: 1.2,
-
-  // 負面信息（需要重點關注）
-  警告: 1.8,
-  異常: 1.8,
-  崩潰: 2.0,
-  嚴重: 1.8,
-  危險: 1.8,
-  緊急: 1.9,
-};
-
 /**
  * 從文本中提取簡短摘要
  * @param text 要提取摘要的文本
@@ -136,66 +76,6 @@ function splitIntoSentences(text: string): string[] {
     .filter((s) => s.trim().length > 0);
 
   return sentences;
-}
-
-/**
- * 為句子評分，決定其在摘要中的重要性
- *
- * @param sentence 要評分的句子
- * @param index 句子在原文中的位置索引
- * @param totalSentences 原文中的總句子數
- * @returns 句子的重要性評分
- */
-function scoreSentence(
-  sentence: string,
-  index: number,
-  totalSentences: number
-): number {
-  let score = 1.0;
-
-  // 位置因素：文檔開頭和結尾的句子通常更重要
-  if (index === 0 || index === totalSentences - 1) {
-    score *= 1.5;
-  } else if (
-    index < Math.ceil(totalSentences * 0.2) ||
-    index >= Math.floor(totalSentences * 0.8)
-  ) {
-    score *= 1.25;
-  }
-
-  // 句子長度因素：過短的句子可能信息量較少，過長的句子可能包含太多信息
-  const wordCount = sentence.split(/\s+/).length;
-  if (wordCount < 3) {
-    score *= 0.8;
-  } else if (wordCount > 25) {
-    score *= 0.9;
-  } else if (wordCount >= 5 && wordCount <= 15) {
-    score *= 1.2;
-  }
-
-  // 關鍵詞因素：包含關鍵詞的句子更重要
-  for (const [keyword, weight] of Object.entries(KEYWORDS)) {
-    if (sentence.includes(keyword)) {
-      score *= weight;
-    }
-  }
-
-  // 句子結構因素：特殊句式可能更重要
-  if (
-    sentence.includes("總結") ||
-    sentence.includes("結論") ||
-    sentence.includes("因此") ||
-    sentence.includes("所以")
-  ) {
-    score *= 1.5;
-  }
-
-  // 數字和專有名詞因素：包含數字和專有名詞的句子通常更重要
-  if (/\d+/.test(sentence)) {
-    score *= 1.3;
-  }
-
-  return score;
 }
 
 /**

@@ -23,13 +23,6 @@ const DO_NOT_TRANSLATE = [
   'GitHub', 'GitLab', 'Bitbucket', 'AWS', 'Azure', 'GCP'
 ];
 
-// Check if a value contains terms that shouldn't be translated
-function containsDoNotTranslate(value: string): string[] {
-  return DO_NOT_TRANSLATE.filter(term => 
-    new RegExp(`\\b${term}\\b`, 'i').test(value)
-  );
-}
-
 // Replace protected terms with placeholders and restore them after translation
 function protectTerms(value: string): { protectedText: string, placeholders: Record<string, string> } {
   let protectedText = value;
@@ -78,16 +71,21 @@ function getContextForNamespace(namespace: string): string {
   return contexts[namespace] || 'User interface';
 }
 
+// Helper type guard for plain objects
+function isPlainObject(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 // Recursively translate all string values in an object
 async function translateObject(
-  obj: any,
+  obj: unknown,
   targetLanguage: string,
   domain: string,
   context: string,
-  existingTranslations: any = {},
+  existingTranslations: unknown = {},
   preserveExisting: boolean = true,
   path: string[] = []
-): Promise<any> {
+): Promise<unknown> {
   if (typeof obj === 'string') {
     // Check if we should preserve existing translation
     if (preserveExisting && existingTranslations && typeof existingTranslations === 'string' && existingTranslations.trim() !== '') {
@@ -121,32 +119,29 @@ async function translateObject(
       console.error(`Translation error for "${obj}":`, error);
       return obj; // Return original on error
     }
-  } else if (Array.isArray(obj)) {
-    return Promise.all(obj.map((item, index) => 
-      translateObject(
-        item, 
-        targetLanguage, 
-        domain, 
-        context, 
-        existingTranslations?.[index], 
-        preserveExisting,
-        [...path, String(index)]
-      )
-    ));
-  } else if (obj && typeof obj === 'object') {
-    const result: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = await translateObject(
-        value, 
-        targetLanguage, 
-        domain, 
-        context, 
-        existingTranslations?.[key], 
-        preserveExisting,
-        [...path, key]
+  } else if (typeof obj === 'object' && obj !== null) {
+    if (Array.isArray(obj)) {
+      // Handle arrays
+      return await Promise.all(
+        obj.map((item, idx) => {
+          const existing = Array.isArray(existingTranslations) ? existingTranslations[idx] : undefined;
+          return translateObject(item, targetLanguage, domain, context, existing, preserveExisting, [...path, String(idx)]);
+        })
       );
+    } else {
+      // Handle objects
+      const result: Record<string, unknown> = {};
+      if (isPlainObject(obj)) {
+        const objEntries = Object.entries(obj as { [key: string]: unknown });
+        for (const [key, value] of objEntries) {
+          const existing = (typeof existingTranslations === 'object' && existingTranslations !== null && !Array.isArray(existingTranslations))
+            ? (existingTranslations as Record<string, unknown>)[key]
+            : undefined;
+          result[key] = await translateObject(value, targetLanguage, domain, context, existing, preserveExisting, [...path, key]);
+        }
+      }
+      return result;
     }
-    return result;
   }
   return obj;
 }
@@ -178,10 +173,10 @@ export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInpu
     const englishJson = JSON.parse(englishContent);
     
     // Count total keys
-    const countKeys = (obj: any): number => {
+    const countKeys = (obj: unknown): number => {
       if (typeof obj === 'string') return 1;
       if (Array.isArray(obj)) return obj.reduce<number>((sum, item) => sum + countKeys(item), 0);
-      if (obj && typeof obj === 'object') {
+      if (isPlainObject(obj)) {
         return Object.values(obj).reduce<number>((sum, value) => sum + countKeys(value), 0);
       }
       return 0;
@@ -232,14 +227,18 @@ export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInpu
       if (dryRun) {
         // In dry run, just analyze what would be translated
         const wouldTranslate = countKeys(englishJson) - (preserveExisting ? countKeys(existingTranslations) : 0);
-        report += `🔄 Would translate ${wouldTranslate} keys\n\n`;
+        report += `�� Would translate ${wouldTranslate} keys\n\n`;
         
         // Show sample translations
         report += `### Sample Translations:\n`;
-        const samples = Object.entries(englishJson).slice(0, 3);
+        const samples = isPlainObject(englishJson) ? Object.entries(englishJson).slice(0, 3) : [];
         for (const [key, value] of samples) {
           if (typeof value === 'string') {
-            const existing = (existingTranslations as any)[key];
+            let existing: string | undefined = undefined;
+            if (isPlainObject(existingTranslations)) {
+              const v = existingTranslations[key];
+              if (typeof v === 'string') existing = v;
+            }
             if (!preserveExisting || !existing) {
               report += `- **${key}**: "${value}" → (would translate)\n`;
             } else {
@@ -274,11 +273,18 @@ export async function retranslateI18n(params: z.infer<typeof RetranslateI18nInpu
           
           // Show some examples
           report += `### Sample Results:\n`;
-          const samples = Object.entries(translatedJson).slice(0, 3);
-          for (const [key, value] of samples) {
+          let sampleEntries: [string, unknown][] = [];
+          if (isPlainObject(translatedJson)) {
+            sampleEntries = Object.entries(translatedJson).slice(0, 3);
+          }
+          for (const [key, value] of sampleEntries) {
             if (typeof value === 'string') {
-              const original = (englishJson as any)[key];
-              report += `- **${key}**: "${original}" → "${value}"\n`;
+              let original: string | undefined = undefined;
+              if (isPlainObject(englishJson)) {
+                const v = englishJson[key];
+                if (typeof v === 'string') original = v;
+              }
+              report += `- **${key}**: "${original ?? ''}" → "${value}"\n`;
             }
           }
           report += '\n';

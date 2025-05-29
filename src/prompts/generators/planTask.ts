@@ -118,7 +118,7 @@ export function getPlanTaskPrompt(params: PlanTaskPromptParams): string {
   }
   const rulesPath = getRulesFilePath();
   const indexTemplate = loadPromptFromTemplate("planTask/index.md");
-  let prompt = generatePrompt(indexTemplate, {
+  const prompt = generatePrompt(indexTemplate, {
     description: params.description,
     requirements: params.requirements || "No requirements",
     tasksTemplate: tasksContent,
