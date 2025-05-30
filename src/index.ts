@@ -57,9 +57,8 @@ import { project, projectSchema } from "./tools/project/unifiedProject.js";
 import { projectContext, projectContextSchema } from "./tools/project/projectContext.js";
 import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/debug/debugTools.js";
 import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.js";
-import { analyzePR, analyzePRSchema } from "./tools/pr/prAnalysisTools.js";
+import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
-import { githubPRContext, githubPRContextSchema } from "./tools/pr/githubPRContextTool.js";
 
 async function main() {
   try {
@@ -222,13 +221,12 @@ async function main() {
           { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
           { name: "list_browser_tabs", description: listBrowserTabs.description, inputSchema: zodToJsonSchema(listBrowserTabsSchema) },
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
-          { name: "analyze_pr", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(analyzePRSchema) },
+          { name: "pull_request", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(pullRequestSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
           { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
           { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
-          { name: "github_pr_context", description: loadPromptFromTemplate("toolsDescription/githubPRContext.md"), inputSchema: zodToJsonSchema(githubPRContextSchema) },
         ],
       };
     });
@@ -345,9 +343,9 @@ async function main() {
               parsedArgs = await checkpointSchema.parseAsync(request.params.arguments);
               result = await checkpoint(parsedArgs);
               break;
-            case "analyze_pr":
-              parsedArgs = await analyzePRSchema.parseAsync(request.params.arguments);
-              result = await analyzePR(parsedArgs);
+            case "pull_request":
+              parsedArgs = await pullRequestSchema.parseAsync(request.params.arguments);
+              result = await pullRequest(parsedArgs);
               break;
             case "check_env":
               await checkEnvSchema.parseAsync(request.params.arguments || {});
@@ -368,10 +366,6 @@ async function main() {
             case "architecture_snapshot":
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
               result = await architectureSnapshot(parsedArgs);
-              break;
-            case "github_pr_context":
-              parsedArgs = await githubPRContextSchema.parseAsync(request.params.arguments);
-              result = await githubPRContext(parsedArgs);
               break;
             default:
               throw new Error(`Tool ${toolName} does not exist`);
