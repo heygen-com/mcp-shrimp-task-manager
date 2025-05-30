@@ -1,34 +1,31 @@
 import { z } from "zod";
 import axios from "axios";
 import { extractRepoInfo, GitPlatform } from "../../utils/gitUtils.js";
-import * as fs from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import * as fs from "fs";
+import * as fsPromises from "fs/promises";
 
 // Schema for PR analysis tool
 export const pullRequestSchema = z.object({
   prUrl: z
     .string()
     .url()
-    .describe("The URL of the pull request to analyze (GitHub, GitLab, Bitbucket supported)"),
+    .describe("The URL of the pull request to fetch and organize data from (GitHub, GitLab, Bitbucket supported)"),
   includeLineByLine: z
     .boolean()
     .optional()
     .default(false)
-    .describe("Whether to include line-by-line analysis in the diff (more detailed but longer)"),
-  focusAreas: z
-    .array(z.string())
-    .optional()
-    .describe("Specific areas to focus on during analysis (e.g., security, performance, code style)"),
+    .describe("Whether to include the full diff content for each file (more detailed but longer)"),
   action: z
     .enum(["review", "fix", "rebuild"])
     .optional()
     .default("review")
-    .describe("Action to perform: 'review' for code review, 'fix' for author addressing feedback, 'rebuild' for extracting context and a rebuild plan"),
+    .describe("Data organization mode: 'review' for reviewer perspective (default), 'fix' for author perspective with CI/test status, 'rebuild' for extracting full context"),
 });
 
-// Interface for PR analysis result
-export interface PRAnalysisResult {
+// Simplified interfaces for PR data (no analysis)
+export interface PRDataResult {
   title: string;
   description: string;
   author: string;
@@ -41,56 +38,17 @@ export interface PRAnalysisResult {
     additions: number;
     deletions: number;
   };
-  files: FileAnalysis[];
-  comments: PRComment[];
-  issues: PRIssue[];
-  summary: PRSummary;
+  files: FileData[];
+  context: ContextData;
+  action: "review" | "fix" | "rebuild";
 }
 
-export interface FileAnalysis {
+export interface FileData {
   path: string;
   status: "added" | "modified" | "deleted" | "renamed";
   additions: number;
   deletions: number;
-  diffs: DiffBlock[];
-  assessment: {
-    quality: "excellent" | "good" | "needs-improvement" | "poor";
-    suggestions: string[];
-    concerns: string[];
-  };
-}
-
-export interface DiffBlock {
-  startLine: number;
-  endLine: number;
-  type: "addition" | "deletion" | "modification";
-  content: string;
-  analysis?: string;
-}
-
-export interface PRComment {
-  author: string;
-  timestamp: Date;
-  content: string;
-  resolved: boolean;
-}
-
-export interface PRIssue {
-  severity: "critical" | "major" | "minor" | "suggestion";
-  type: "bug" | "security" | "performance" | "style" | "maintainability" | "other";
-  file?: string;
-  line?: number;
-  description: string;
-  suggestion?: string;
-}
-
-export interface PRSummary {
-  overview: string;
-  keyChanges: string[];
-  qualityScore: number; // 0-100
-  recommendations: string[];
-  risks: string[];
-  technicalDebt: string[];
+  patch?: string; // The raw diff patch if includeLineByLine is true
 }
 
 // Add this interface near the top:
@@ -120,31 +78,6 @@ interface DiffFile {
   chunks: DiffChunk[];
   additions: number;
   deletions: number;
-}
-
-// Add FixMeta and related interfaces for type safety
-interface FailingTest {
-  name: string;
-  status: string;
-  link: string;
-}
-
-interface MergeConflict {
-  file: string;
-  link: string;
-}
-
-interface GroupedComment {
-  reviewer: string;
-  mustFix: string[];
-  suggestions: string[];
-  unresolved: string[];
-}
-
-interface FixMeta {
-  failingTests: FailingTest[];
-  mergeConflicts: MergeConflict[];
-  groupedComments: GroupedComment[];
 }
 
 // Add: ContextData interface for context section
@@ -185,17 +118,28 @@ interface ContextData {
   }>;
 }
 
+// File-based debug logger
+function debugLog(msg: string) {
+  try {
+    fs.appendFileSync("/tmp/pr_tool_debug.log", `[${new Date().toISOString()}] ${msg}\n`);
+  } catch { /* intentionally ignore logging errors */ }
+}
+
+// Replace all DEBUG_LOG console.* calls with debugLog
+const DEBUG_LOG = true;
+
 // Main PR analysis function
 export async function pullRequest({
   prUrl,
   includeLineByLine = false,
-  focusAreas = [],
   action = "review",
 }: z.infer<typeof pullRequestSchema>) {
   try {
+    if (DEBUG_LOG) debugLog(`pullRequest: prUrl=${prUrl}, includeLineByLine=${includeLineByLine}, action=${action}`);
     // Extract repository information from URL
     const repoInfo = extractRepoInfo(prUrl);
     if (!repoInfo) {
+      if (DEBUG_LOG) debugLog(`Invalid PR URL: ${prUrl}`);
       throw new Error("Invalid PR URL. Supported platforms: GitHub, GitLab, Bitbucket");
     }
 
@@ -220,66 +164,91 @@ export async function pullRequest({
       unresolved_review_threads: [],
       file_diffs_with_blockers: [],
     };
-    let githubContextRaw: {
-      filesData: unknown;
-      reviewCommentsData: unknown;
-      issueCommentsData: unknown;
-      reviewsData: unknown;
-      statusData: unknown;
-      checkRunsData: unknown;
-    } | undefined = undefined;
+
     switch (repoInfo.platform) {
-      case GitPlatform.GITHUB:
+      case GitPlatform.GITHUB: {
+        if (DEBUG_LOG) debugLog(`Fetching GitHub PR data for ${JSON.stringify(repoInfo)}`);
         prData = await fetchGitHubPR(repoInfo);
+        if (DEBUG_LOG) {
+          if (typeof prData === 'object' && prData !== null && 'title' in prData) {
+            debugLog(`PR data fetched. Title: ${(prData as { title?: string }).title}`);
+          } else {
+            debugLog(`PR data fetched. (title not found)`);
+          }
+        }
         diffData = await fetchGitHubDiff(repoInfo);
-        githubContextRaw = await fetchGitHubContext(repoInfo, prData);
+        if (DEBUG_LOG) debugLog(`Diff data fetched. Length: ${diffData.length} chars`);
+        // Fetch additional context for GitHub
+        const githubContext = await fetchGitHubContext(repoInfo, prData);
+        if (DEBUG_LOG) debugLog(`GitHub context fetched. Files: ${Array.isArray(githubContext.filesData) ? githubContext.filesData.length : 0}`);
         contextData = processGitHubContext(
           prData,
-          githubContextRaw.filesData,
-          githubContextRaw.reviewCommentsData,
-          githubContextRaw.issueCommentsData,
-          githubContextRaw.reviewsData,
-          githubContextRaw.statusData,
-          githubContextRaw.checkRunsData,
+          githubContext.filesData,
+          githubContext.reviewCommentsData,
+          githubContext.issueCommentsData,
+          githubContext.reviewsData,
+          githubContext.statusData,
+          githubContext.checkRunsData,
           prUrl
         );
         break;
+      }
       case GitPlatform.GITLAB:
       case GitPlatform.BITBUCKET:
-        prData = await (repoInfo.platform === GitPlatform.GITLAB ? fetchGitLabPR() : fetchBitbucketPR());
-        diffData = await (repoInfo.platform === GitPlatform.GITLAB ? fetchGitLabDiff() : fetchBitbucketDiff());
-        // TODO: Add context fetching for GitLab/Bitbucket
-        contextData = {
-          pr_metadata: {
-            title: '',
-            description: '',
-            created_at: '',
-            status: '',
-            source_branch: '',
-            target_branch: '',
-            pr_number: 0,
-            pr_url: prUrl,
-            author: { username: '', profile_url: '' },
-          },
-          changed_files: [],
-          reviewers_status: [],
-          required_checks: [],
-          unresolved_review_threads: [],
-          file_diffs_with_blockers: [],
-        };
-        break;
+        if (DEBUG_LOG) debugLog(`Platform not implemented: ${repoInfo.platform}`);
+        throw new Error(`${repoInfo.platform} support not yet implemented`);
       default:
+        if (DEBUG_LOG) debugLog(`Unsupported platform: ${repoInfo.platform}`);
         throw new Error(`Unsupported platform: ${repoInfo.platform}`);
     }
 
-    // Analyze the PR with action
-    const analysis = await performAnalysisWithAction(prData, diffData, includeLineByLine, focusAreas, action, prUrl);
+    // Collect and organize data without analysis
+    const dataResult = await performDataCollection(prData, diffData, includeLineByLine);
+    if (DEBUG_LOG) {
+      debugLog(`Data collection complete. Files: ${dataResult.files.length}`);
+      dataResult.files.forEach(f => {
+        const patchLen = typeof f.patch === 'string' ? f.patch.length : 0;
+        debugLog(`File: ${f.path}, status: ${f.status}, additions: ${f.additions}, deletions: ${f.deletions}, patch length: ${patchLen}`);
+        if (patchLen > 100000) {
+          debugLog(`Patch for ${f.path} is very large (${patchLen} chars)`);
+        }
+        if (!f.patch || patchLen === 0) {
+          debugLog(`Patch for ${f.path} is empty!`);
+        }
+      });
+    }
+    dataResult.context = contextData;
+    dataResult.action = action;
 
-    // Generate markdown report based on action, with context at the top
-    const report = generateMarkdownReportWithContext(analysis, prUrl, action, contextData);
+    if (DEBUG_LOG) {
+      const manifest = {
+        filesCount: dataResult.files.length,
+        titlePresent: !!dataResult.title,
+        descriptionPresent: !!dataResult.description,
+        authorPresent: !!dataResult.author,
+        prMetadataPresent: !!dataResult.context?.pr_metadata && Object.keys(dataResult.context.pr_metadata).length > 0,
+        changedFilesContextCount: dataResult.context?.changed_files?.length || 0,
+        reviewersStatusCount: dataResult.context?.reviewers_status?.length || 0,
+        requiredChecksCount: dataResult.context?.required_checks?.length || 0,
+        unresolvedReviewThreadsCount: dataResult.context?.unresolved_review_threads?.length || 0,
+        fileDiffsWithBlockersCount: dataResult.context?.file_diffs_with_blockers?.length || 0,
+        action: dataResult.action
+      };
+      debugLog(`Data collection manifest before generating report: ${JSON.stringify(manifest)}`);
+    }
+
+    // Generate report based on action
+    const report = generateDataReport(dataResult, prUrl);
+    if (DEBUG_LOG) {
+      debugLog(`Final report generated. Length: ${report.length} chars`);
+      if (report.length > 100000) {
+        debugLog(`Report is very large (${report.length} chars)`);
+      }
+    }
 
     // Save report to file
     const savedFilePath = await saveReport(report);
+    if (DEBUG_LOG) debugLog(`Report saved to: ${savedFilePath}`);
 
     return {
       content: [
@@ -289,26 +258,25 @@ export async function pullRequest({
         },
       ],
       ephemeral: {
-        analysis: analysis,
-        context: contextData,
+        data: dataResult,
         savedTo: savedFilePath,
       },
     };
   } catch (error: unknown) {
-    console.error("Error in pullRequest tool:", error);
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during PR analysis.";
+    debugLog(`Error in pullRequest tool: ${error instanceof Error ? error.message : String(error)}`);
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during PR data collection.";
     return {
       content: [
         {
           type: "text" as const,
-          text: `Error during PR analysis: ${errorMessage}`,
+          text: `Error during PR data collection: ${errorMessage}`,
         },
       ],
     };
   }
 }
 
-// Platform-specific fetchers (simplified for now, can be expanded)
+// Platform-specific fetchers
 async function fetchGitHubPR(repoInfo: unknown): Promise<unknown> {
   const apiUrl = `https://api.github.com/repos/${(repoInfo as { owner: string; repo: string; prNumber: number }).owner}/${(repoInfo as { owner: string; repo: string; prNumber: number }).repo}/pulls/${(repoInfo as { owner: string; repo: string; prNumber: number }).prNumber}`;
   
@@ -385,66 +353,6 @@ async function fetchGitHubDiff(repoInfo: unknown): Promise<string> {
   }
 }
 
-// Placeholder functions for other platforms
-async function fetchGitLabPR(): Promise<unknown> {
-  throw new Error("GitLab support not yet implemented");
-}
-
-async function fetchGitLabDiff(): Promise<string> {
-  throw new Error("GitLab support not yet implemented");
-}
-
-async function fetchBitbucketPR(): Promise<unknown> {
-  throw new Error("Bitbucket support not yet implemented");
-}
-
-async function fetchBitbucketDiff(): Promise<string> {
-  throw new Error("Bitbucket support not yet implemented");
-}
-
-// Analysis logic
-async function performAnalysis(
-  prData: unknown,
-  diffData: string,
-  includeLineByLine: boolean,
-  focusAreas: string[]
-): Promise<PRAnalysisResult> {
-  // Parse diff data
-  const files = parseDiff(diffData);
-
-  // Analyze each file
-  const fileAnalyses: FileAnalysis[] = files.map(file => analyzeFile(file, includeLineByLine, focusAreas));
-
-  // Extract comments and issues
-  const comments = extractComments();
-  const issues = identifyIssues(fileAnalyses);
-
-  // Type assertion: we only call performAnalysis with GitHub PRs here
-  const pr = prData as GitHubPRData;
-
-  // Generate summary
-  const summary = generateSummary(pr, fileAnalyses, issues);
-
-  return {
-    title: pr.title,
-    description: pr.body || "",
-    author: pr.user?.login || "Unknown",
-    branch: {
-      source: pr.head?.ref || "Unknown",
-      target: pr.base?.ref || "Unknown",
-    },
-    stats: {
-      filesChanged: pr.changed_files || files.length,
-      additions: pr.additions || 0,
-      deletions: pr.deletions || 0,
-    },
-    files: fileAnalyses,
-    comments,
-    issues,
-    summary,
-  };
-}
-
 // Diff parsing
 function parseDiff(diffData: string): DiffFile[] {
   // Basic diff parsing - this is a simplified version
@@ -495,305 +403,11 @@ function parseDiff(diffData: string): DiffFile[] {
   return files;
 }
 
-// File analysis
-function analyzeFile(file: DiffFile, includeLineByLine: boolean, focusAreas: string[]): FileAnalysis {
-  const diffs: DiffBlock[] = [];
-  const suggestions: string[] = [];
-  const concerns: string[] = [];
-
-  // Analyze each chunk
-  for (const chunk of file.chunks || []) {
-    const diffBlock = analyzeChunk(chunk, includeLineByLine);
-    diffs.push(...diffBlock);
-
-    // Check for common issues
-    const chunkIssues = checkChunkIssues(chunk, focusAreas);
-    concerns.push(...chunkIssues.concerns);
-    suggestions.push(...chunkIssues.suggestions);
-  }
-
-  // Determine quality based on analysis
-  const quality = determineQuality(concerns, suggestions);
-
-  return {
-    path: file.path,
-    status: determineFileStatus(file),
-    additions: file.additions,
-    deletions: file.deletions,
-    diffs,
-    assessment: {
-      quality,
-      suggestions: [...new Set(suggestions)], // Remove duplicates
-      concerns: [...new Set(concerns)],
-    },
-  };
-}
-
-// Helper functions
-function analyzeChunk(chunk: DiffChunk, includeLineByLine: boolean): DiffBlock[] {
-  // Simplified chunk analysis
-  return [{
-    startLine: chunk.newStart,
-    endLine: chunk.newStart + chunk.newLines - 1,
-    type: "modification" as const,
-    content: chunk.lines.join("\n"),
-    analysis: includeLineByLine ? "Line-by-line analysis would go here" : undefined,
-  }];
-}
-
-function checkChunkIssues(chunk: DiffChunk, focusAreas: string[]): { concerns: string[], suggestions: string[] } {
-  const concerns: string[] = [];
-  const suggestions: string[] = [];
-
-  // Basic checks (can be expanded)
-  const codeContent = chunk.lines.join("\n");
-  
-  // Security checks
-  if (focusAreas.includes("security") || focusAreas.length === 0) {
-    if (codeContent.includes("eval(") || codeContent.includes("exec(")) {
-      concerns.push("Potential security risk: Use of eval/exec detected");
-    }
-  }
-
-  // Performance checks
-  if (focusAreas.includes("performance") || focusAreas.length === 0) {
-    if (codeContent.includes("SELECT * FROM")) {
-      suggestions.push("Consider specifying columns instead of using SELECT *");
-    }
-  }
-
-  return { concerns, suggestions };
-}
-
+// Helper function
 function determineFileStatus(file: DiffFile): "added" | "modified" | "deleted" | "renamed" {
   if (file.additions > 0 && file.deletions === 0) return "added";
   if (file.additions === 0 && file.deletions > 0) return "deleted";
   return "modified";
-}
-
-function determineQuality(concerns: string[], suggestions: string[]): "excellent" | "good" | "needs-improvement" | "poor" {
-  if (concerns.length === 0 && suggestions.length === 0) return "excellent";
-  if (concerns.length === 0 && suggestions.length <= 2) return "good";
-  if (concerns.length <= 2) return "needs-improvement";
-  return "poor";
-}
-
-function extractComments(): PRComment[] {
-  // For now, return empty array - would need to fetch comments separately
-  return [];
-}
-
-function identifyIssues(fileAnalyses: FileAnalysis[]): PRIssue[] {
-  const issues: PRIssue[] = [];
-
-  for (const file of fileAnalyses) {
-    // Convert concerns to issues
-    for (const concern of file.assessment.concerns) {
-      issues.push({
-        severity: "major",
-        type: determineIssueType(concern),
-        file: file.path,
-        description: concern,
-      });
-    }
-
-    // Convert suggestions to issues
-    for (const suggestion of file.assessment.suggestions) {
-      issues.push({
-        severity: "suggestion",
-        type: determineIssueType(suggestion),
-        file: file.path,
-        description: suggestion,
-      });
-    }
-  }
-
-  return issues;
-}
-
-function determineIssueType(description: string): "bug" | "security" | "performance" | "style" | "maintainability" | "other" {
-  const lowercased = description.toLowerCase();
-  if (lowercased.includes("security") || lowercased.includes("eval") || lowercased.includes("injection")) return "security";
-  if (lowercased.includes("performance") || lowercased.includes("slow") || lowercased.includes("optimize")) return "performance";
-  if (lowercased.includes("style") || lowercased.includes("format") || lowercased.includes("naming")) return "style";
-  if (lowercased.includes("maintainability") || lowercased.includes("readable") || lowercased.includes("complex")) return "maintainability";
-  if (lowercased.includes("bug") || lowercased.includes("error") || lowercased.includes("fix")) return "bug";
-  return "other";
-}
-
-function generateSummary(prData: unknown, fileAnalyses: FileAnalysis[], issues: PRIssue[]): PRSummary {
-  // Type assertion: we only call generateSummary with GitHub PRs here
-  const pr = prData as GitHubPRData;
-  const keyChanges: string[] = [];
-  const recommendations: string[] = [];
-  const risks: string[] = [];
-  const technicalDebt: string[] = [];
-
-  // Analyze file changes
-  for (const file of fileAnalyses) {
-    if (file.status === "added") {
-      keyChanges.push(`Added new file: ${file.path}`);
-    } else if (file.deletions > file.additions * 2) {
-      keyChanges.push(`Major refactoring in: ${file.path}`);
-    }
-
-    // Collect recommendations
-    recommendations.push(...file.assessment.suggestions);
-
-    // Identify risks
-    if (file.assessment.quality === "poor") {
-      risks.push(`Code quality concerns in ${file.path}`);
-    }
-  }
-
-  // Calculate quality score
-  const totalFiles = fileAnalyses.length;
-  const qualityScores = {
-    "excellent": 100,
-    "good": 80,
-    "needs-improvement": 60,
-    "poor": 40,
-  };
-  
-  const averageQuality = fileAnalyses.reduce((sum, file) => 
-    sum + qualityScores[file.assessment.quality], 0) / totalFiles;
-
-  // Identify critical issues
-  const criticalIssues = issues.filter(issue => issue.severity === "critical");
-  if (criticalIssues.length > 0) {
-    risks.push(`${criticalIssues.length} critical issues found`);
-  }
-
-  return {
-    overview: `This PR ${pr.title} contains ${totalFiles} file changes with ${pr.additions} additions and ${pr.deletions} deletions.`,
-    keyChanges: [...new Set(keyChanges)].slice(0, 5), // Top 5 unique changes
-    qualityScore: Math.round(averageQuality),
-    recommendations: [...new Set(recommendations)].slice(0, 5), // Top 5 unique recommendations
-    risks: [...new Set(risks)],
-    technicalDebt,
-  };
-}
-
-// Generate markdown report
-function generateMarkdownReport(analysis: PRAnalysisResult, prUrl: string): string {
-  const sections: string[] = [];
-
-  // Header
-  sections.push(`# Pull Request Analysis Report`);
-  sections.push(`\n**PR:** [${analysis.title}](${prUrl})`);
-  sections.push(`**Author:** ${analysis.author}`);
-  sections.push(`**Branch:** ${analysis.branch.source} → ${analysis.branch.target}`);
-  sections.push(`**Stats:** ${analysis.stats.filesChanged} files changed (+${analysis.stats.additions} -${analysis.stats.deletions})\n`);
-
-  // Comments Section (at the very top, before summary)
-  if (analysis.comments && analysis.comments.length > 0) {
-    sections.push(`---`);
-    sections.push(`## 💬 PR Comments`);
-    analysis.comments.forEach((comment, idx) => {
-      const date = new Date(comment.timestamp);
-      const friendly = date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      sections.push(`**${comment.author}** commented on _${friendly}_ ${comment.resolved ? '✅ (resolved)' : ''}`);
-      sections.push(`> ${comment.content.replace(/\n/g, '\n> ')}`);
-      if (idx < analysis.comments.length - 1) {
-        sections.push(`\n---\n`);
-      }
-    });
-    sections.push('');
-  }
-
-  // Summary Section
-  sections.push(`## Summary\n`);
-  sections.push(`${analysis.summary.overview}\n`);
-  sections.push(`**Quality Score:** ${analysis.summary.qualityScore}/100\n`);
-
-  if (analysis.summary.keyChanges.length > 0) {
-    sections.push(`### Key Changes`);
-    analysis.summary.keyChanges.forEach(change => {
-      sections.push(`- ${change}`);
-    });
-    sections.push("");
-  }
-
-  // Files Section
-  sections.push(`## File Changes\n`);
-  
-  for (const file of analysis.files) {
-    sections.push(`### ${file.path}`);
-    sections.push(`**Status:** ${file.status} | **Quality:** ${file.assessment.quality}`);
-    sections.push(`**Changes:** +${file.additions} -${file.deletions}\n`);
-
-    // Add diff blocks
-    if (file.diffs.length > 0) {
-      sections.push("```diff");
-      for (const diff of file.diffs) {
-        sections.push(diff.content);
-      }
-      sections.push("```\n");
-    }
-
-    // Add assessment
-    if (file.assessment.concerns.length > 0) {
-      sections.push(`**Concerns:**`);
-      file.assessment.concerns.forEach(concern => {
-        sections.push(`- ⚠️ ${concern}`);
-      });
-      sections.push("");
-    }
-
-    if (file.assessment.suggestions.length > 0) {
-      sections.push(`**Suggestions:**`);
-      file.assessment.suggestions.forEach(suggestion => {
-        sections.push(`- 💡 ${suggestion}`);
-      });
-      sections.push("");
-    }
-  }
-
-  // Issues Section
-  if (analysis.issues.length > 0) {
-    sections.push(`## Issues Found\n`);
-    
-    const issuesBySeverity = analysis.issues.reduce((acc, issue) => {
-      if (!acc[issue.severity]) acc[issue.severity] = [];
-      acc[issue.severity].push(issue);
-      return acc;
-    }, {} as Record<string, PRIssue[]>);
-
-    for (const [severity, severityIssues] of Object.entries(issuesBySeverity)) {
-      sections.push(`### ${severity.charAt(0).toUpperCase() + severity.slice(1)}`);
-      for (const issue of severityIssues) {
-        const location = issue.file ? ` (${issue.file}${issue.line ? `:${issue.line}` : ""})` : "";
-        sections.push(`- **[${issue.type}]** ${issue.description}${location}`);
-        if (issue.suggestion) {
-          sections.push(`  - Suggestion: ${issue.suggestion}`);
-        }
-      }
-      sections.push("");
-    }
-  }
-
-  // Recommendations Section
-  if (analysis.summary.recommendations.length > 0 || analysis.summary.risks.length > 0) {
-    sections.push(`## Recommendations & Risks\n`);
-    
-    if (analysis.summary.recommendations.length > 0) {
-      sections.push(`### Recommendations`);
-      analysis.summary.recommendations.forEach(rec => {
-        sections.push(`- ${rec}`);
-      });
-      sections.push("");
-    }
-
-    if (analysis.summary.risks.length > 0) {
-      sections.push(`### Risks`);
-      analysis.summary.risks.forEach(risk => {
-        sections.push(`- 🚨 ${risk}`);
-      });
-      sections.push("");
-    }
-  }
-
-  return sections.join("\n");
 }
 
 // Helper function to save the report
@@ -809,14 +423,14 @@ async function saveReport(report: string): Promise<string> {
     const reportsDir = path.join(DATA_DIR, "reports");
     
     // Ensure reports directory exists
-    await fs.mkdir(reportsDir, { recursive: true });
+    await fsPromises.mkdir(reportsDir, { recursive: true });
     
     // Generate filename with timestamp and PR info
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     // The following is a placeholder since repoInfo is unknown
     const filename = `report-${timestamp}.md`;
     const filePath = path.join(reportsDir, filename);
-    await fs.writeFile(filePath, report, 'utf-8');
+    await fsPromises.writeFile(filePath, report, 'utf-8');
     // Metadata file is omitted since repoInfo is unknown
     return filePath;
   } catch {
@@ -826,129 +440,164 @@ async function saveReport(report: string): Promise<string> {
   }
 }
 
-// New: Perform analysis with action branching
-async function performAnalysisWithAction(
+// Simplified data collection (no analysis)
+async function performDataCollection(
   prData: unknown,
   diffData: string,
-  includeLineByLine: boolean,
-  focusAreas: string[],
-  action: "review" | "fix" | "rebuild",
-  prUrl: string
-): Promise<PRAnalysisResult | (PRAnalysisResult & { fixMeta: FixMeta })> {
-  if (action === "review") {
-    // Standard review analysis (existing logic)
-    return await performAnalysis(prData, diffData, includeLineByLine, focusAreas);
-  } else if (action === "fix") {
-    // Fix-focused analysis
-    // TODO: Fetch CI/test status, merge conflicts, and real comments from platform APIs
-    // For now, use placeholders for these fields
-    const baseAnalysis = await performAnalysis(prData, diffData, includeLineByLine, focusAreas);
-    // Placeholder: Failing tests, merge conflicts, and grouped comments
-    const failingTests: FailingTest[] = [
-      // TODO: Replace with real CI status fetching
-      { name: "unit-test", status: "failed", link: `${prUrl}/checks` },
-    ];
-    const mergeConflicts: MergeConflict[] = [
-      // TODO: Replace with real merge conflict detection
-      { file: "src/conflictedFile.ts", link: `${prUrl}/files` },
-    ];
-    const groupedComments: GroupedComment[] = [
-      // TODO: Replace with real grouped comments by reviewer
-      {
-        reviewer: "reviewer1",
-        mustFix: ["Please fix the bug in src/foo.ts"],
-        suggestions: ["Consider refactoring bar() for clarity."],
-        unresolved: ["What about edge case X?"],
-      },
-    ];
-    return {
-      ...baseAnalysis,
-      fixMeta: {
-        failingTests,
-        mergeConflicts,
-        groupedComments,
-      },
-    };
-  } else if (action === "rebuild") {
-    // Rebuild-focused analysis
-    // TODO: Implement rebuild logic
-    return await performAnalysis(prData, diffData, includeLineByLine, focusAreas);
-  }
-  // fallback (should not reach here)
-  return await performAnalysis(prData, diffData, includeLineByLine, focusAreas);
+  includeLineByLine: boolean
+): Promise<PRDataResult> {
+  // Parse diff data
+  const files = parseDiff(diffData);
+  
+  // Type assertion: we only call this with GitHub PRs here
+  const pr = prData as GitHubPRData;
+
+  // Map files to simplified FileData without analysis
+  const fileData: FileData[] = files.map(file => ({
+    path: file.path,
+    status: determineFileStatus(file),
+    additions: file.additions,
+    deletions: file.deletions,
+    patch: includeLineByLine ? extractFilePatch(diffData, file.path) : undefined,
+  }));
+
+  // Return pure data without analysis
+  return {
+    title: pr.title,
+    description: pr.body || "",
+    author: pr.user?.login || "Unknown",
+    branch: {
+      source: pr.head?.ref || "Unknown",
+      target: pr.base?.ref || "Unknown",
+    },
+    stats: {
+      filesChanged: pr.changed_files || files.length,
+      additions: pr.additions || 0,
+      deletions: pr.deletions || 0,
+    },
+    files: fileData,
+    context: {} as ContextData, // Will be populated by fetchGitHubContext
+    action: "review", // Will be set by caller
+  };
 }
 
-// New: Generate markdown report with action branching
-function generateMarkdownReportWithAction(
-  analysis: PRAnalysisResult | (PRAnalysisResult & { fixMeta: FixMeta }),
-  prUrl: string,
-  action: "review" | "fix" | "rebuild"
-): string {
-  if (action === "review") {
-    // Standard review report (existing logic)
-    return generateMarkdownReport(analysis, prUrl);
-  } else if (action === "fix") {
-    // Fix-focused actionable checklist
-    const sections: string[] = [];
-    sections.push(`# Pull Request Fix Report`);
-    sections.push(`\n**PR:** [${analysis.title}](${prUrl})`);
-    sections.push(`**Author:** ${analysis.author}`);
-    sections.push(`**Branch:** ${analysis.branch.source} → ${analysis.branch.target}`);
-    sections.push(`**Stats:** ${analysis.stats.filesChanged} files changed (+${analysis.stats.additions} -${analysis.stats.deletions})\n`);
-    // Failing tests
-    if ((analysis as { fixMeta?: FixMeta }).fixMeta?.failingTests?.length) {
-      sections.push(`## ❌ Failing CI/Tests`);
-      (analysis as { fixMeta: FixMeta }).fixMeta.failingTests.forEach((test: FailingTest) => {
-        sections.push(`- [${test.name}](${test.link}): **${test.status}**`);
-      });
-      sections.push("");
+// Helper to extract raw patch for a specific file
+function extractFilePatch(diffData: string, filePath: string): string {
+  const lines = diffData.split('\n');
+  let capturing = false;
+  let patch = '';
+  
+  for (const line of lines) {
+    if (line.startsWith('diff --git') && line.includes(filePath)) {
+      capturing = true;
+    } else if (capturing && line.startsWith('diff --git')) {
+      break;
     }
-    // Merge conflicts
-    if ((analysis as { fixMeta?: FixMeta }).fixMeta?.mergeConflicts?.length) {
-      sections.push(`## ⚠️ Merge Conflicts`);
-      (analysis as { fixMeta: FixMeta }).fixMeta.mergeConflicts.forEach((conflict: MergeConflict) => {
-        sections.push(`- [${conflict.file}](${conflict.link})`);
-      });
-      sections.push("");
+    
+    if (capturing) {
+      patch += line + '\n';
     }
-    // Grouped comments by reviewer
-    if ((analysis as { fixMeta?: FixMeta }).fixMeta?.groupedComments?.length) {
-      sections.push(`## 📝 Review Feedback (Grouped by Reviewer)`);
-      (analysis as { fixMeta: FixMeta }).fixMeta.groupedComments.forEach((group: GroupedComment) => {
-        sections.push(`### Reviewer: ${group.reviewer}`);
-        if (group.mustFix?.length) {
-          sections.push(`**Must Fix:**`);
-          group.mustFix.forEach((item: string) => sections.push(`- [ ] ${item}`));
-        }
-        if (group.unresolved?.length) {
-          sections.push(`**Unresolved:**`);
-          group.unresolved.forEach((item: string) => sections.push(`- [ ] ${item}`));
-        }
-        if (group.suggestions?.length) {
-          sections.push(`**Suggestions (Nice to Have):**`);
-          group.suggestions.forEach((item: string) => sections.push(`- [ ] ${item}`));
-        }
-        sections.push("");
-      });
-    }
-    // PR readiness checklist
-    sections.push(`## ✅ PR Readiness Checklist`);
-    sections.push(`- [ ] All failing tests resolved`);
-    sections.push(`- [ ] All must-fix review comments addressed`);
-    sections.push(`- [ ] All merge conflicts resolved`);
-    sections.push(`- [ ] All unresolved comments addressed`);
-    sections.push("");
-    // Optionally, add file changes summary
-    sections.push(`## File Changes (Summary)`);
-    for (const file of analysis.files) {
-      sections.push(`- ${file.path}: +${file.additions} -${file.deletions}`);
-    }
-    return sections.join("\n");
-  } else if (action === "rebuild") {
-    // Rebuild action should not reach this function - it's handled in generateMarkdownReportWithContext
-    throw new Error("Rebuild action should be handled by generateMarkdownReportWithContext");
   }
-  return "";
+  
+  return patch.trim();
+}
+
+// Helper to generate a data report based on the collected data
+function generateDataReport(dataResult: PRDataResult, prUrl: string): string {
+  const sections: string[] = [];
+  
+  // Add context section first
+  sections.push(generateContextMarkdown(dataResult.context));
+  
+  // Header
+  sections.push(`# Pull Request Data Report`);
+  sections.push(`\n**PR:** [${dataResult.title}](${prUrl})`);
+  sections.push(`**Author:** ${dataResult.author}`);
+  sections.push(`**Branch:** ${dataResult.branch.source} → ${dataResult.branch.target}`);
+  sections.push(`**Stats:** ${dataResult.stats.filesChanged} files changed (+${dataResult.stats.additions} -${dataResult.stats.deletions})\n`);
+
+  // Action-specific content
+  if (dataResult.action === "fix") {
+    sections.push(generateFixActionContent(dataResult.context));
+  } else if (dataResult.action === "rebuild") {
+    sections.push(generateRebuildActionContent(dataResult.context));
+  }
+
+  // Files Section
+  sections.push(`## File Changes\n`);
+  
+  for (const file of dataResult.files) {
+    sections.push(`### ${file.path}`);
+    sections.push(`**Status:** ${file.status}`);
+    sections.push(`**Changes:** +${file.additions} -${file.deletions}\n`);
+
+    // Add raw patch if included
+    if (file.patch) {
+      sections.push("```diff");
+      sections.push(file.patch);
+      sections.push("```\n");
+    }
+  }
+
+  sections.push(`---\n`);
+  sections.push(`**Note:** This report organizes PR data for analysis. The agent will perform any code review analysis based on this information.`);
+
+  return sections.join("\n");
+}
+
+// Helper to generate fix action specific content
+function generateFixActionContent(context: ContextData): string {
+  const sections: string[] = [];
+  
+  // Show failing checks prominently
+  if (context.required_checks && context.required_checks.some(check => check.status === "failure")) {
+    sections.push(`## ❌ Failing Checks\n`);
+    context.required_checks
+      .filter(check => check.status === "failure")
+      .forEach(check => {
+        sections.push(`- **${check.name}**: ${check.status}`);
+        if (check.details_url) {
+          sections.push(`  [View Details](${check.details_url})`);
+        }
+      });
+    sections.push("");
+  }
+  
+  // Show unresolved comments grouped by reviewer
+  if (context.unresolved_review_threads && context.unresolved_review_threads.length > 0) {
+    sections.push(`## 📝 Unresolved Review Comments\n`);
+    context.unresolved_review_threads.forEach(thread => {
+      sections.push(`- **File**: ${thread.path || "unknown"}`);
+      sections.push(`  - ${thread.body || ""}`);
+    });
+    sections.push("");
+  }
+  
+  return sections.join("\n");
+}
+
+// Helper to generate rebuild action specific content
+function generateRebuildActionContent(context: ContextData): string {
+  const sections: string[] = [];
+  
+  sections.push(`## Rebuild Context\n`);
+  sections.push(`This PR contains work that may need to be rebuilt. Below is the full context:\n`);
+  
+  if (context.pr_metadata.description) {
+    sections.push(`### Original PR Intent`);
+    sections.push(context.pr_metadata.description);
+    sections.push("");
+  }
+  
+  if (context.unresolved_review_threads && context.unresolved_review_threads.length > 0) {
+    sections.push(`### Review Feedback`);
+    context.unresolved_review_threads.forEach(thread => {
+      sections.push(`- **${thread.path || "general"}**: ${thread.body || ""}`);
+    });
+    sections.push("");
+  }
+  
+  return sections.join("\n");
 }
 
 // Add: Helper functions for GitHub context fetching
@@ -1156,73 +805,4 @@ function generateContextMarkdown(context: ContextData): string {
     });
   }
   return md + "\n---\n";
-}
-
-// Add: Unified markdown report generator with context at the top
-function generateMarkdownReportWithContext(
-  analysis: PRAnalysisResult | (PRAnalysisResult & { fixMeta: FixMeta }),
-  prUrl: string,
-  action: "review" | "fix" | "rebuild",
-  context: ContextData
-): string {
-  const contextSection = generateContextMarkdown(context);
-  let rest = "";
-  if (action === "rebuild") {
-    rest = generateRebuildReport(prUrl, context);
-  } else {
-    rest = generateMarkdownReportWithAction(analysis, prUrl, action);
-  }
-  return contextSection + "\n" + rest;
-}
-
-// Add: Rebuild report generator
-function generateRebuildReport(prUrl: string, context: ContextData): string {
-  const sections: string[] = [];
-  sections.push(`# PR Rebuild Plan`);
-  sections.push(`\n**PR:** [${context.pr_metadata.title}](${prUrl})`);
-  sections.push(`**Author:** ${context.pr_metadata.author.username}`);
-  sections.push(`**Branch:** ${context.pr_metadata.source_branch} → ${context.pr_metadata.target_branch}`);
-  sections.push(`**Status:** ${context.pr_metadata.status}`);
-  sections.push(`**Created at:** ${new Date(context.pr_metadata.created_at).toLocaleString()}`);
-  if (context.pr_metadata.description) {
-    sections.push(`\n## PR Description / Intentions`);
-    sections.push(context.pr_metadata.description);
-  }
-  // Summarize intentions and logic from comments (TODO: advanced summarization)
-  if (context.unresolved_review_threads.length > 0) {
-    sections.push(`\n## Reviewer Comments (Intentions, Issues, Suggestions)`);
-    context.unresolved_review_threads.forEach((thread) => {
-      sections.push(`- File: ${thread.path || "unknown"}`);
-      sections.push(`  - Comment: ${thread.body || ""}`);
-    });
-  }
-  // List all changed files
-  if (context.changed_files.length > 0) {
-    sections.push(`\n## Changed Files`);
-    context.changed_files.forEach((file) => {
-      sections.push(`- ${file}`);
-    });
-  }
-  // Include diffs for files with blockers
-  if (context.file_diffs_with_blockers.length > 0) {
-    sections.push(`\n## Diffs for Files with Unresolved Comments`);
-    context.file_diffs_with_blockers.forEach((file) => {
-      sections.push(`### ${file.filename}`);
-      sections.push("```diff");
-      sections.push(file.diff);
-      sections.push("```");
-    });
-  }
-  // Rebuild plan/checklist (TODO: advanced extraction)
-  sections.push(`\n## Rebuild Checklist & Plan`);
-  sections.push(`- [ ] Review all intentions and logic from PR description and comments.`);
-  sections.push(`- [ ] Identify salvageable code and document what should be reused.`);
-  sections.push(`- [ ] List any known issues or blockers from comments and diffs.`);
-  sections.push(`- [ ] Create a new branch and port over the best parts of this PR.`);
-  sections.push(`- [ ] Re-implement or refactor as needed, using this report as a guide.`);
-  sections.push(`- [ ] Ensure all quality checks (linter, tests, etc.) pass on the new branch.`);
-  sections.push(`- [ ] Document any additional context or decisions made during the rebuild.`);
-  sections.push(`\n---\n`);
-  sections.push(`**Note:** This plan is a starting point. For a more detailed extraction of intentions and logic, consider using advanced AI summarization or manual review of the PR and its comments.`);
-  return sections.join("\n");
 } 
