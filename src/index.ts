@@ -59,6 +59,7 @@ import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/
 import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.js";
 import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
+import { JiraToolSchema, jiraToolHandler } from "./tools/jiraTools.js";
 
 async function main() {
   try {
@@ -227,6 +228,7 @@ async function main() {
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
           { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
+          { name: "jira", description: "Manages JIRA tickets (create, find, update, list, sync).", inputSchema: zodToJsonSchema(JiraToolSchema) },
         ],
       };
     });
@@ -367,7 +369,13 @@ async function main() {
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
               result = await architectureSnapshot(parsedArgs);
               break;
+            case "jira":
+              parsedArgs = await JiraToolSchema.parseAsync(request.params.arguments);
+              result = await jiraToolHandler(parsedArgs);
+              break;
             default:
+              // Log the tool name and arguments for debugging
+              console.error(`Unknown tool: ${toolName}`);
               throw new Error(`Tool ${toolName} does not exist`);
           }
 
