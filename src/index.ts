@@ -60,7 +60,7 @@ import express, { Request, Response } from "express";
 import getPort from "get-port";
 import fsPromises from "fs/promises";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consult/consultExpertTool.js';
-import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
+import { browser, browserSchema } from './tools/browser/unifiedBrowser.js';
 import { queryMemories } from './models/memoryModel.js';
 import { memories, memorySchema } from './tools/memory/unifiedMemory.js';
 import {
@@ -370,8 +370,7 @@ async function main() {
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
-          { name: "check_browser_logs", description: checkBrowserLogs.description, inputSchema: zodToJsonSchema(checkBrowserLogsSchema) },
-          { name: "list_browser_tabs", description: listBrowserTabs.description, inputSchema: zodToJsonSchema(listBrowserTabsSchema) },
+          { name: "browser", description: "Unified browser tool - interact with MCP DevTools Bridge. Use action parameter to specify operation (list_tabs, check_logs).", inputSchema: zodToJsonSchema(browserSchema) },
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
           { name: "pull_request", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(pullRequestSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
@@ -485,13 +484,9 @@ async function main() {
               parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
               result = await checkAgentStatus();
               break;  
-            case "check_browser_logs":
-              parsedArgs = await checkBrowserLogsSchema.parseAsync(request.params.arguments || {}); // Accepts empty object
-              result = await checkBrowserLogs.execute(parsedArgs); // Call the execute method
-              break;
-            case "list_browser_tabs":
-              parsedArgs = await listBrowserTabsSchema.parseAsync(request.params.arguments || {});
-              result = await listBrowserTabs.execute(); // Corrected: execute() takes no arguments
+            case "browser":
+              parsedArgs = await browserSchema.parseAsync(request.params.arguments);
+              result = await browser(parsedArgs);
               break;
             case "checkpoint":
               parsedArgs = await checkpointSchema.parseAsync(request.params.arguments);
