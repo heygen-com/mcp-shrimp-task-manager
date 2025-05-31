@@ -1,0 +1,1 @@
+Engage in research mode: summarize research goals, track previous state, and iteratively refine research direction and findings. Use this tool to structure and document research processes for complex or open-ended problems. 

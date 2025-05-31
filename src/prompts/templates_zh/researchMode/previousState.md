@@ -1,0 +1,1 @@
+**前次狀態：** {previousState} 

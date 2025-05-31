@@ -1191,6 +1191,7 @@ export async function queryTask({
 export const getTaskDetailSchema = z.object({
   taskId: z
     .string()
+    .uuid({ message: "任務ID格式無效，請提供有效的UUID格式" })
     .min(1, {
       message: "任務ID不能為空，請提供有效的任務ID",
     })

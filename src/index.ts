@@ -107,6 +107,7 @@ import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.
 import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
 import { JiraToolSchema, jiraToolHandler } from "./tools/jiraTools.js";
+import { researchMode, researchModeSchema } from './tools/research/researchMode.js';
 
 async function main() {
   try {
@@ -376,6 +377,7 @@ async function main() {
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool. Actions: create (analyze & document codebase), update (create new snapshot & compare), compare (diff two snapshots), list (show all snapshots). Options: depth, includeNodeModules, outputFormat. Use action parameter.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
           { name: "jira", description: "Manages JIRA items. Actions: create (create tickets/epics), update (modify items), find (search items), list (show items), sync (sync with JIRA), verify_credentials (check auth). Domains: ticket, project, component, migration. Use action parameter.", inputSchema: zodToJsonSchema(JiraToolSchema) },
+          { name: "research_mode", description: loadPromptFromTemplate("toolsDescription/researchMode.md"), inputSchema: zodToJsonSchema(researchModeSchema) },
         ],
       };
     });
@@ -524,6 +526,11 @@ async function main() {
                 contentItems.push({ type: 'text', text: 'JIRA tool executed, no specific markdown, JSON, or URL output produced.'});
               }
               result = { content: contentItems }; 
+              break;
+            }
+            case "research_mode": {
+              parsedArgs = await researchModeSchema.parseAsync(request.params.arguments);
+              result = await researchMode(parsedArgs);
               break;
             }
             default:
