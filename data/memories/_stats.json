@@ -1,0 +1,14 @@
+{
+  "totalMemories": 1,
+  "byType": {
+    "breakthrough": 1,
+    "decision": 0,
+    "feedback": 0,
+    "error_recovery": 0,
+    "pattern": 0,
+    "user_preference": 0
+  },
+  "byProject": {},
+  "averageRelevanceScore": 0,
+  "lastUpdated": "2025-05-31T11:24:18.538Z"
+}

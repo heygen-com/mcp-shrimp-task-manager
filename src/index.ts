@@ -1,4 +1,3 @@
-import { z } from "zod";
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs'; // For file logging
@@ -62,26 +61,10 @@ import getPort from "get-port";
 import fsPromises from "fs/promises";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consult/consultExpertTool.js';
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
-import { translateContent, translateContentSchema } from './tools/translation/translationTool.js';
-import { retranslateI18n, retranslateI18nSchema } from './tools/translation/i18nRetranslationTool.js';
-import { consolidateTranslationMemory, consolidateTranslationMemorySchema } from './tools/translation/consolidateTranslationMemory.js';
 import { queryMemories } from './models/memoryModel.js';
-import { exportMemories, exportMemoriesSchema, importMemories, importMemoriesSchema } from './tools/memoryBackup.js';
+import { memories, memorySchema } from './tools/memory/unifiedMemory.js';
 import {
-  recordMemory,
-  recordMemorySchema,
-  queryMemory,
-  queryMemorySchema,
-  getMemoryById,
-  updateMemoryContent,
-  updateMemorySchema,
-  deleteMemoryById,
-  deleteMemorySchema,
-  memoryMaintenance,
-  memoryMaintenanceSchema,
   getMemoryChain,
-  getMemoryChainSchema,
-  consolidateMemoriesAction
 } from './tools/memoryTool.js';
 import {
   planTask,
@@ -124,7 +107,6 @@ import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.
 import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
 import { JiraToolSchema, jiraToolHandler } from "./tools/jiraTools.js";
-import { generateMemoryAnalytics, memoryAnalyticsSchema } from './tools/memoryAnalytics.js';
 
 async function main() {
   try {
@@ -265,7 +247,8 @@ async function main() {
           const format = req.query.format as string || 'json';
           const projectId = req.query.projectId as string || undefined;
           
-          const result = await exportMemories({
+          const result = await memories({
+            action: 'export',
             format: format as 'json' | 'markdown',
             projectId,
             includeArchived: true
@@ -273,7 +256,7 @@ async function main() {
 
           // Extract file path from result text
           const text = result.content[0].text;
-          const pathMatch = text.match(/exported .+ to:\n(.+)\n/);
+          const pathMatch = text.match(/Exported \d+ memories to (.+)$/);
           if (pathMatch && pathMatch[1]) {
             const filePath = pathMatch[1];
             res.download(filePath);
@@ -383,16 +366,7 @@ async function main() {
           { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
           { name: "project", description: "Unified project management tool - create, update, delete, list, open projects, and generate prompts. Use action parameter to specify operation.", inputSchema: zodToJsonSchema(projectSchema) },
           { name: "project_context", description: "Project context management - add, search, analyze, export context entries. Essential for capturing learnings, decisions, problems, and solutions.", inputSchema: zodToJsonSchema(projectContextSchema) },
-          { name: "record_memory", description: "Record a memory (breakthrough, decision, feedback, error recovery, pattern, or user preference) with automatic duplicate detection", inputSchema: zodToJsonSchema(recordMemorySchema) },
-          { name: "query_memory", description: "Query memories by type, tags, project, or search text with context-aware relevance scoring", inputSchema: zodToJsonSchema(queryMemorySchema) },
-          { name: "update_memory", description: "Update an existing memory, creating a new version while preserving the original", inputSchema: zodToJsonSchema(updateMemorySchema) },
-          { name: "delete_memory", description: "Delete a memory by ID", inputSchema: zodToJsonSchema(deleteMemorySchema) },
-          { name: "memory_maintenance", description: "Perform memory maintenance operations (archive old, decay scores, get stats)", inputSchema: zodToJsonSchema(memoryMaintenanceSchema) },
-          { name: "get_memory_chain", description: "Get a chain of related memories starting from a specific memory", inputSchema: zodToJsonSchema(getMemoryChainSchema) },
-          { name: "consolidate_memories", description: "Analyze and consolidate similar memories to reduce duplication", inputSchema: zodToJsonSchema(z.object({})) },
-          { name: "memory_analytics", description: "Generate detailed analytics and insights about memory usage patterns", inputSchema: zodToJsonSchema(memoryAnalyticsSchema) },
-          { name: "export_memories", description: "Export memories to JSON or Markdown format for backup or migration", inputSchema: zodToJsonSchema(exportMemoriesSchema) },
-          { name: "import_memories", description: "Import memories from a previously exported file", inputSchema: zodToJsonSchema(importMemoriesSchema) },
+          { name: "memories", description: "Unified memory management tool - record, query, update, delete, maintain, analyze memories. Use action parameter to specify operation.", inputSchema: zodToJsonSchema(memorySchema) },
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
@@ -401,9 +375,6 @@ async function main() {
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
           { name: "pull_request", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(pullRequestSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
-          { name: "translate_content", description: loadPromptFromTemplate("toolsDescription/translateContent.md"), inputSchema: zodToJsonSchema(translateContentSchema) },
-          { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
-          { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
           { name: "jira", description: "Manages JIRA items (tickets, projects, etc.). Actions: create, find, update, list, sync, verify_credentials. For verify_credentials, domain and context are ignored.", inputSchema: zodToJsonSchema(JiraToolSchema) },
         ],
@@ -497,51 +468,9 @@ async function main() {
               parsedArgs = await projectContextSchema.parseAsync(request.params.arguments);
               result = await projectContext(parsedArgs);
               break;
-            case "record_memory":
-              parsedArgs = await recordMemorySchema.parseAsync(request.params.arguments);
-              result = await recordMemory(parsedArgs);
-              break;
-            case "query_memory":
-              parsedArgs = await queryMemorySchema.parseAsync(request.params.arguments);
-              result = await queryMemory(parsedArgs);
-              break;
-            case "update_memory":
-              parsedArgs = await updateMemorySchema.parseAsync(request.params.arguments);
-              result = await updateMemoryContent(parsedArgs);
-              break;
-            case "delete_memory":
-              parsedArgs = await deleteMemorySchema.parseAsync(request.params.arguments);
-              result = await deleteMemoryById(parsedArgs);
-              break;
-            case "memory_maintenance":
-              parsedArgs = await memoryMaintenanceSchema.parseAsync(request.params.arguments);
-              result = await memoryMaintenance(parsedArgs);
-              break;
-            case "get_memory":
-              if (typeof request.params.arguments.memoryId === 'string') {
-                result = await getMemoryById(request.params.arguments.memoryId);
-              } else {
-                throw new Error("memoryId must be a string");
-              }
-              break;
-            case "get_memory_chain":
-              parsedArgs = await getMemoryChainSchema.parseAsync(request.params.arguments);
-              result = await getMemoryChain(parsedArgs);
-              break;
-            case "consolidate_memories":
-              result = await consolidateMemoriesAction();
-              break;
-            case "memory_analytics":
-              parsedArgs = await memoryAnalyticsSchema.parseAsync(request.params.arguments);
-              result = await generateMemoryAnalytics(parsedArgs);
-              break;
-            case "export_memories":
-              parsedArgs = await exportMemoriesSchema.parseAsync(request.params.arguments);
-              result = await exportMemories(parsedArgs);
-              break;
-            case "import_memories":
-              parsedArgs = await importMemoriesSchema.parseAsync(request.params.arguments);
-              result = await importMemories(parsedArgs);
+            case "memories":
+              parsedArgs = await memorySchema.parseAsync(request.params.arguments);
+              result = await memories(parsedArgs);
               break;
             case "log_data_dir":
               await logDataDirSchema.parseAsync(request.params.arguments || {});
@@ -575,18 +504,6 @@ async function main() {
             case "check_env":
               await checkEnvSchema.parseAsync(request.params.arguments || {});
               result = await checkEnv();
-              break;
-            case "translate_content":
-              parsedArgs = await translateContentSchema.parseAsync(request.params.arguments);
-              result = await translateContent(parsedArgs);
-              break;
-            case "retranslate_i18n":
-              parsedArgs = await retranslateI18nSchema.parseAsync(request.params.arguments);
-              result = await retranslateI18n(parsedArgs);
-              break;
-            case "consolidate_translation_memory":
-              parsedArgs = await consolidateTranslationMemorySchema.parseAsync(request.params.arguments);
-              result = await consolidateTranslationMemory(parsedArgs);
               break;
             case "architecture_snapshot":
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);

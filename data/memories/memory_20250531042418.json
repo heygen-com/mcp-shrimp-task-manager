@@ -1,0 +1,22 @@
+{
+  "content": "This is a test memory created by the unified memory tool test script",
+  "summary": "Test memory from unified tool",
+  "type": "breakthrough",
+  "tags": [
+    "test",
+    "unified-memory"
+  ],
+  "entities": [],
+  "relatedMemories": [],
+  "confidence": 0.9,
+  "metadata": {},
+  "contextSnapshot": {},
+  "archived": false,
+  "author": "agent",
+  "id": "mem_1748690658535_ir8ift9sh",
+  "version": 1,
+  "created": "2025-05-31T11:24:18.535Z",
+  "lastAccessed": "2025-05-31T11:24:18.535Z",
+  "accessCount": 0,
+  "relevanceScore": 1
+}

@@ -1,0 +1,31 @@
+{
+  "projectIndex": {},
+  "typeIndex": {
+    "breakthrough": [
+      "mem_1748690658535_ir8ift9sh"
+    ],
+    "decision": [],
+    "feedback": [],
+    "error_recovery": [],
+    "pattern": [],
+    "user_preference": []
+  },
+  "tagIndex": {
+    "test": [
+      "mem_1748690658535_ir8ift9sh"
+    ],
+    "unified-memory": [
+      "mem_1748690658535_ir8ift9sh"
+    ]
+  },
+  "entityIndex": {},
+  "temporalIndex": [
+    {
+      "id": "mem_1748690658535_ir8ift9sh",
+      "timestamp": "2025-05-31T11:24:18.535Z"
+    }
+  ],
+  "fileIndex": {
+    "mem_1748690658535_ir8ift9sh": "memory_20250531042418.json"
+  }
+}
