@@ -1,4 +1,42 @@
-import "dotenv/config";
+import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs'; // For file logging
+import { fileURLToPath } from 'url'; // Needed for __dirname in ES Modules
+
+const startupLogPath = '/tmp/mcp_shrimp_startup_debug.log';
+let envResolutionLog = `Timestamp: ${new Date().toISOString()}\n`;
+
+try {
+  const __filename = fileURLToPath(import.meta.url);
+  envResolutionLog += `__filename (import.meta.url): ${__filename}\n`;
+  const __dirname = path.dirname(__filename);
+  envResolutionLog += `__dirname (esm): ${__dirname}\n`;
+  const projectRoot = path.resolve(__dirname, '..'); // Assumes dist is one level down from project root
+  envResolutionLog += `projectRoot (resolved from __dirname): ${projectRoot}\n`;
+  const resolvedEnvPath = path.resolve(projectRoot, '.env');
+  envResolutionLog += `Attempting to load .env from: ${resolvedEnvPath}\n`;
+  
+  dotenv.config({ path: resolvedEnvPath });
+  envResolutionLog += `dotenv.config() called for path: ${resolvedEnvPath}\n`;
+
+} catch (e) {
+  const errorMessage = (e instanceof Error) ? e.message : String(e);
+  envResolutionLog += `Error during dotenv setup: ${errorMessage}\n`;
+}
+
+// Log JIRA env vars (or their absence) AFTER attempting to load .env
+const jiraBaseUrl = process.env.JIRA_BASE_URL;
+const jiraUserEmail = process.env.JIRA_USER_EMAIL;
+const jiraApiTokenExists = !!process.env.JIRA_API_TOKEN;
+envResolutionLog += `JIRA_BASE_URL: ${jiraBaseUrl}\nJIRA_USER_EMAIL: ${jiraUserEmail}\nJIRA_API_TOKEN_EXISTS: ${jiraApiTokenExists}\n---\n`;
+
+try {
+  fs.appendFileSync(startupLogPath, envResolutionLog);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+} catch (_err) {
+  // Cannot use console.log here
+}
+
 import { loadPromptFromTemplate } from "./prompts/loader.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -10,10 +48,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import express, { Request, Response } from "express";
 import getPort from "get-port";
-import path from "path";
-import fs from "fs";
 import fsPromises from "fs/promises";
-import { fileURLToPath } from "url";
 import { consultExpert, ConsultExpertInputSchema } from './tools/consult/consultExpertTool.js';
 import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserTabsSchema } from './tools/browserTools.js';
 import { translateContent, translateContentSchema } from './tools/translation/translationTool.js';
@@ -228,7 +263,7 @@ async function main() {
           { name: "retranslate_i18n", description: loadPromptFromTemplate("toolsDescription/retranslateI18n.md"), inputSchema: zodToJsonSchema(retranslateI18nSchema) },
           { name: "consolidate_translation_memory", description: loadPromptFromTemplate("toolsDescription/consolidateTranslationMemory.md"), inputSchema: zodToJsonSchema(consolidateTranslationMemorySchema) },
           { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
-          { name: "jira", description: "Manages JIRA tickets (create, find, update, list, sync).", inputSchema: zodToJsonSchema(JiraToolSchema) },
+          { name: "jira", description: "Manages JIRA items (tickets, projects, etc.). Actions: create, find, update, list, sync, verify_credentials. For verify_credentials, domain and context are ignored.", inputSchema: zodToJsonSchema(JiraToolSchema) },
         ],
       };
     });
@@ -369,10 +404,28 @@ async function main() {
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
               result = await architectureSnapshot(parsedArgs);
               break;
-            case "jira":
+            case "jira": {
               parsedArgs = await JiraToolSchema.parseAsync(request.params.arguments);
-              result = await jiraToolHandler(parsedArgs);
+              const jiraResult = await jiraToolHandler(parsedArgs);
+              const contentItems = [];
+              if (jiraResult.markdown) {
+                // Present markdown as plain text for now
+                contentItems.push({ type: 'text', text: jiraResult.markdown });
+              }
+              if (jiraResult.json) {
+                // Present stringified JSON as plain text
+                contentItems.push({ type: 'text', text: `JSON Data:\n${JSON.stringify(jiraResult.json, null, 2)}` });
+              }
+              if (jiraResult.url) {
+                contentItems.push({ type: 'text', text: `Relevant URL: ${jiraResult.url}` });
+              }
+              // If no specific content, provide a default message
+              if (contentItems.length === 0) {
+                contentItems.push({ type: 'text', text: 'JIRA tool executed, no specific markdown, JSON, or URL output produced.'});
+              }
+              result = { content: contentItems }; 
               break;
+            }
             default:
               // Log the tool name and arguments for debugging
               console.error(`Unknown tool: ${toolName}`);

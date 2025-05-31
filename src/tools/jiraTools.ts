@@ -2,11 +2,24 @@ import "dotenv/config";
 import { z } from "zod";
 import fetch from "node-fetch";
 import fs from "fs/promises";
+import fsSync from 'fs';
 import path from "path";
+
+const jiraToolLogPath = '/tmp/mcp_shrimp_jira_tool.log';
+
+function appendJiraToolLog(message: string) {
+  const timestamp = new Date().toISOString();
+  try {
+    fsSync.appendFileSync(jiraToolLogPath, `${timestamp}: ${message}\n`);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } catch (_err) {
+    // Can't console.log error here, it might break stdio
+  }
+}
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "find", "list", "sync"]),
+  action: z.enum(["create", "update", "find", "list", "sync", "verify_credentials"]),
   domain: z.enum(["ticket", "project", "component", "migration"]),
   context: z.object({
     projectKey: z.string().optional(),
@@ -15,7 +28,7 @@ export const JiraToolSchema = z.object({
     labels: z.array(z.string()).optional(),
     metadata: z.record(z.string(), z.any()).optional(),
     // Add more fields as needed for extensibility
-  }),
+  }).passthrough(), // Allow other fields for specific actions if needed
   options: z.object({}).passthrough().optional(), // For future extensibility
 });
 
@@ -35,8 +48,10 @@ function getJiraEnv() {
   const email = process.env.JIRA_USER_EMAIL;
   const apiToken = process.env.JIRA_API_TOKEN;
   if (!baseUrl || !email || !apiToken) {
+    appendJiraToolLog("[ERROR] getJiraEnv: Missing JIRA credentials in environment variables.");
     throw new Error("Missing JIRA credentials in environment variables");
   }
+  appendJiraToolLog("[INFO] getJiraEnv: Credentials successfully retrieved from process.env.");
   return { baseUrl, email, apiToken };
 }
 
@@ -155,7 +170,47 @@ async function findAssignedTickets(projectKey?: string): Promise<Record<string, 
   }));
 }
 
+// Helper to verify JIRA API credentials by calling /myself
+async function verifyJiraApiCredentials(): Promise<{ success: boolean; data: unknown; message: string }> {
+  appendJiraToolLog("[INFO] verifyJiraApiCredentials: Attempting to verify.");
+  try {
+    const { baseUrl, email, apiToken } = getJiraEnv();
+    const myselfUrl = `${baseUrl}/rest/api/3/myself`;
+    appendJiraToolLog(`[INFO] verifyJiraApiCredentials: Calling URL: ${myselfUrl}`);
+    const auth = Buffer.from(`${email}:${apiToken}`).toString('base64');
+
+    const response = await fetch(myselfUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json',
+      },
+    });
+
+    const responseStatus = response.status;
+    const responseData = await response.json();
+    appendJiraToolLog(`[INFO] verifyJiraApiCredentials: Received status ${responseStatus}. Data: ${JSON.stringify(responseData).substring(0, 100)}...`);
+
+    if (response.ok) {
+      return { success: true, data: responseData, message: "Credentials are valid. User details fetched." };
+    } else {
+      return { success: false, data: responseData, message: `API Error ${responseStatus} ${response.statusText}. Credentials may be incorrect or lack permissions.` };
+    }
+  } catch (error) {
+    let errorMessage = "Failed to verify JIRA credentials due to a script error.";
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      if (error.cause && typeof error.cause === 'object' && 'code' in error.cause && error.cause.code === 'ENOTFOUND') {
+        errorMessage += ` (Network Hint: Could not resolve JIRA_BASE_URL: ${process.env.JIRA_BASE_URL})`;
+      }
+    }
+    appendJiraToolLog(`[ERROR] verifyJiraApiCredentials: Exception - ${errorMessage}`);
+    return { success: false, data: { error: errorMessage }, message: errorMessage };
+  }
+}
+
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
+  appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
   switch (input.action) {
     case "create":
       if (input.domain === "ticket") {
@@ -219,11 +274,19 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         };
       }
       break;
+    case "verify_credentials": {
+      appendJiraToolLog("[INFO] jiraToolHandler: Executing verify_credentials.");
+      const verificationResult = await verifyJiraApiCredentials();
+      return {
+        markdown: `# JIRA Credential Verification\n\nStatus: ${verificationResult.success ? 'SUCCESS' : 'FAILED'}\nMessage: ${verificationResult.message}\n\nData:\n\`\`\`json\n${JSON.stringify(verificationResult.data, null, 2)}\n\`\`\``,
+        json: verificationResult,
+      };
+    }
     // Add more cases for update, list, sync, etc.
     default:
       throw new Error("Unsupported action/domain combination");
   }
-  throw new Error("Not implemented");
+  throw new Error("Not implemented yet or invalid action/domain for this path."); // Adjusted default error
 }
 
 // Integration points:
