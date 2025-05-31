@@ -130,6 +130,103 @@ export enum ProjectStatus {
   COMPLETED = "completed", // Completed project
 }
 
+// External tracker types
+export enum TrackerType {
+  JIRA = "jira",
+  GITHUB = "github",
+  GITLAB = "gitlab",
+  LINEAR = "linear",
+  ASANA = "asana",
+  TRELLO = "trello",
+  NOTION = "notion",
+  OTHER = "other",
+}
+
+// JIRA issue types
+export enum JiraIssueType {
+  EPIC = "epic",
+  STORY = "story",
+  TASK = "task",
+  BUG = "bug",
+  SUBTASK = "subtask",
+}
+
+// Project priority levels
+export enum ProjectPriority {
+  CRITICAL = "critical",
+  HIGH = "high",
+  MEDIUM = "medium",
+  LOW = "low",
+}
+
+// Project category/type
+export enum ProjectCategory {
+  FEATURE = "feature",
+  BUGFIX = "bugfix",
+  REFACTOR = "refactor",
+  RESEARCH = "research",
+  INFRASTRUCTURE = "infrastructure",
+  DOCUMENTATION = "documentation",
+  PROTOTYPE = "prototype",
+  MIGRATION = "migration",
+}
+
+// External tracker info
+export interface ExternalTracker {
+  type: TrackerType; // Type of external tracker
+  issueKey?: string; // Issue key (e.g., PROJ-123 for JIRA)
+  issueType?: JiraIssueType | string; // Type of issue (epic, story, etc.)
+  url?: string; // Direct URL to the issue
+  parentKey?: string; // Parent issue key (for subtasks)
+  metadata?: Record<string, unknown>; // Additional tracker-specific data
+}
+
+// Project metadata
+export interface ProjectMetadata {
+  // People & teams
+  owner?: string; // Project owner/lead
+  assignees?: string[]; // Team members assigned
+  team?: string; // Team name
+  stakeholders?: string[]; // List of stakeholders
+  
+  // Time & planning
+  deadline?: Date; // Project deadline
+  startDate?: Date; // Project start date
+  estimatedHours?: number; // Estimated hours
+  actualHours?: number; // Actual hours spent
+  
+  // Technical details
+  repository?: string; // Git repository URL
+  branch?: string; // Main development branch
+  environment?: string; // Target environment (dev, staging, prod)
+  version?: string; // Project version
+  
+  // Documentation & resources
+  documentationUrls?: string[]; // Links to docs, wikis
+  designUrls?: string[]; // Links to designs, mockups
+  meetingNotes?: string[]; // Links to meeting notes
+  
+  // Business context
+  budget?: number; // Project budget
+  businessValue?: string; // Business value description
+  kpis?: string[]; // Key performance indicators
+  
+  // Risk & dependencies
+  risks?: string[]; // Identified risks
+  externalDependencies?: string[]; // External dependencies
+  blockers?: string[]; // Current blockers
+}
+
+// Project milestone
+export interface ProjectMilestone {
+  id: string;
+  name: string;
+  description?: string;
+  dueDate?: Date;
+  completed: boolean;
+  completedAt?: Date;
+}
+
 // Project interface: defines the complete data structure for a project
 export interface Project {
   id: string; // Unique project identifier
@@ -144,6 +241,13 @@ export interface Project {
   contextIds: string[]; // IDs of context entries
   insightIds: string[]; // IDs of insights
   projectId?: string; // Optional parent project ID for sub-projects
+  
+  // New fields for external tracking and metadata
+  priority?: ProjectPriority; // Project priority
+  category?: ProjectCategory; // Project type/category
+  externalTracker?: ExternalTracker; // External tracker integration
+  metadata?: ProjectMetadata; // Additional project metadata
+  milestones?: ProjectMilestone[]; // Project milestones
 }
 
 // Project context types

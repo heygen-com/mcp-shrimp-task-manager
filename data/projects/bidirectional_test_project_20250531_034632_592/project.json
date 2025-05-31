@@ -1,0 +1,17 @@
+{
+  "id": "bidirectional_test_project_20250531_034632_592",
+  "name": "Bidirectional Test Project",
+  "description": "Testing bidirectional JIRA linking",
+  "status": "active",
+  "goals": [],
+  "tags": [
+    "test",
+    "jira",
+    "bidirectional"
+  ],
+  "createdAt": "2025-05-31T10:46:32.593Z",
+  "updatedAt": "2025-05-31T10:46:32.593Z",
+  "taskIds": [],
+  "contextIds": [],
+  "insightIds": []
+}

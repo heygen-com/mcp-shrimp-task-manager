@@ -5,6 +5,10 @@ import {
   ProjectStatus,
   ProjectReport,
   ProjectContextType,
+  ProjectPriority,
+  ProjectCategory,
+  ExternalTracker,
+  ProjectMetadata,
 } from "../types/index.js";
 import fs from "fs/promises";
 import path from "path";
@@ -80,17 +84,25 @@ async function writeProjectMetadata(project: Project): Promise<void> {
   await fs.writeFile(metadataFile, JSON.stringify(project, null, 2));
 }
 
+// Project folders are now named using a semantic, slugified version of the project name, e.g. 'translation_project_xxxxx'.
+// This makes project folders and files human-readable and searchable.
+// When opening a project, if not found by ID or name, a semantic search fallback is used.
+
 // Create a new project
 export async function createProject(
   name: string,
   description: string,
   goals?: string[],
-  tags?: string[]
+  tags?: string[],
+  priority?: ProjectPriority,
+  category?: ProjectCategory,
+  externalTracker?: ExternalTracker,
+  metadata?: ProjectMetadata
 ): Promise<Project> {
   await ensureProjectsDir();
   
-  // Generate human-readable project ID
-  const baseId = generateProjectId();
+  // Generate human-readable, semantic project ID (folder name)
+  const baseId = generateProjectId(name); // Pass name for semantic slug
   const existingProjects = await getAllProjects();
   const existingIds = existingProjects.map(p => p.id);
   const projectId = await ensureUniqueProjectId(baseId, existingIds);
@@ -115,6 +127,10 @@ export async function createProject(
     taskIds: [],
     contextIds: [],
     insightIds: [],
+    priority,
+    category,
+    externalTracker,
+    metadata,
   };
   
   await writeProjectMetadata(newProject);
@@ -482,7 +498,7 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
   let prompt = `# Project: ${project.name}\n\n`;
   prompt += `## Description\n${project.description}\n\n`;
   
-  if (project.goals.length > 0) {
+  if (project.goals && project.goals.length > 0) {
     prompt += `## Goals\n`;
     project.goals.forEach((goal: string) => {
       prompt += `- ${goal}\n`;
@@ -490,7 +506,7 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
     prompt += `\n`;
   }
   
-  if (insights.length > 0) {
+  if (insights && insights.length > 0) {
     prompt += `## Key Insights\n`;
     insights.slice(0, 5).forEach(insight => {
       prompt += `### ${insight.title} (${insight.impact} impact)\n`;
@@ -551,14 +567,61 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
   // Add project metadata
   prompt += `## Project Metadata\n`;
   prompt += `- **Status**: ${project.status}\n`;
+  if (project.priority) {
+    prompt += `- **Priority**: ${project.priority}\n`;
+  }
+  if (project.category) {
+    prompt += `- **Category**: ${project.category}\n`;
+  }
   prompt += `- **Created**: ${project.createdAt.toISOString()}\n`;
   prompt += `- **Last Updated**: ${project.updatedAt.toISOString()}\n`;
   prompt += `- **Total Contexts**: ${contexts.length}\n`;
   prompt += `- **Total Insights**: ${insights.length}\n`;
   prompt += `- **Total Tasks**: ${tasks.length}\n`;
-  if (project.tags.length > 0) {
+  if (project.tags && project.tags.length > 0) {
     prompt += `- **Tags**: ${project.tags.join(", ")}\n`;
   }
+  
+  // Add external tracker info
+  if (project.externalTracker) {
+    prompt += `\n### External Tracker\n`;
+    prompt += `- **Type**: ${project.externalTracker.type.toUpperCase()}\n`;
+    prompt += `- **Issue**: ${project.externalTracker.issueKey}`;
+    if (project.externalTracker.issueType) {
+      prompt += ` (${project.externalTracker.issueType})`;
+    }
+    prompt += `\n`;
+    if (project.externalTracker.url) {
+      prompt += `- **URL**: ${project.externalTracker.url}\n`;
+    }
+  }
+  
+  // Add project details
+  if (project.metadata) {
+    prompt += `\n### Project Details\n`;
+    if (project.metadata.owner) {
+      prompt += `- **Owner**: ${project.metadata.owner}\n`;
+    }
+    if (project.metadata.team) {
+      prompt += `- **Team**: ${project.metadata.team}\n`;
+    }
+    if (project.metadata.deadline) {
+      const deadline = new Date(project.metadata.deadline);
+      const daysLeft = Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      prompt += `- **Deadline**: ${deadline.toLocaleDateString()} (${daysLeft} days ${daysLeft > 0 ? 'remaining' : 'overdue'})\n`;
+    }
+    if (project.metadata.repository) {
+      prompt += `- **Repository**: ${project.metadata.repository}\n`;
+    }
+    if (project.metadata.estimatedHours) {
+      prompt += `- **Estimated Hours**: ${project.metadata.estimatedHours}\n`;
+    }
+    if (project.metadata.actualHours) {
+      prompt += `- **Actual Hours**: ${project.metadata.actualHours}\n`;
+    }
+  }
+  
+  prompt += `\n`;
   
   // Save the prompt as a markdown file in the project directory
   const { projectDir } = getProjectPaths(projectId);
@@ -595,4 +658,12 @@ export async function searchProjects(
     }
     return false;
   });
+}
+
+// Fallback: find project by semantic match (name, tags, description)
+export async function findProjectBySemanticMatch(query: string): Promise<Project | null | Project[]> {
+  const matches = await searchProjects(query, ["name", "tags", "description"]);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) return matches; // Let caller handle multiple
+  return null;
 } 

@@ -4,6 +4,77 @@
 
 > **Note—HeyGen Fork:** This is a fork of the original `cjo4m06/mcp-shrimp-task-manager` repository, managed by Heygen and potentially containing custom modifications.
 
+## Semantic Project Naming (New)
+
+**When creating a new project, always use a semantically meaningful, human-readable, and searchable name for the project folder and files.**
+
+- The folder name should reflect the project's purpose or domain (e.g., `translation_project`, `market_data_lake`, `ui_kit_deprecation`), not a random or opaque ID.
+- The project's main JSON file will be stored in this folder.
+- If a unique identifier is needed, it will be appended after the semantic name (e.g., `translation_project_xxxxx`).
+- This makes it easy to search, manage, and understand projects in the filesystem and UI.
+- If you attempt to open a project by name and there is no direct match, the system will now search all projects for a semantic match by name, tags, or description, and open the best match if found.
+- If multiple possible matches are found, you will be shown a list to choose from.
+
+**Example Structure:**
+```
+data/
+  projects/
+    translation_project_xxxxx/
+      project.json
+      context/
+      reports/
+      tasks/
+    market_data_lake_yyyyy/
+      project.json
+      ...
+```
+
+## External Tracker Integration & Project Metadata (New)
+
+**Projects now support integration with external tracking systems (JIRA, GitHub Issues, Linear, etc.) and rich metadata for better project management.**
+
+### External Tracker Support
+
+When creating a project, you'll be prompted to associate it with an external tracker:
+
+- **Supported Trackers**: JIRA, GitHub, GitLab, Linear, Asana, Trello, Notion
+- **Issue Types**: Epic, Story, Task, Bug, Subtask (for JIRA)
+- **Automatic Linking**: Store issue keys and URLs for easy reference
+
+Example:
+```
+project create --name "Translation System" --trackerType jira --trackerIssueKey "TRANS-100" --trackerIssueType epic
+```
+
+### Project Metadata
+
+Projects can now store comprehensive metadata:
+
+- **People & Teams**: Owner, assignees, team, stakeholders
+- **Time & Planning**: Start date, deadline, estimated/actual hours
+- **Technical Details**: Repository URL, branch, environment, version
+- **Documentation**: Links to docs, designs, meeting notes
+- **Business Context**: Budget, business value, KPIs
+- **Risk Management**: Identified risks, dependencies, blockers
+
+### Project Classification
+
+- **Priority Levels**: Critical, High, Medium, Low
+- **Categories**: Feature, Bugfix, Refactor, Research, Infrastructure, Documentation, Prototype, Migration
+
+### Benefits
+
+- **Better Organization**: Projects are connected to real-world work items
+- **Team Collaboration**: Clear ownership and responsibility
+- **Time Management**: Track deadlines and effort
+- **Risk Visibility**: Surface blockers and dependencies early
+- **Business Alignment**: Connect technical work to business goals
+
+When listing projects, you'll see this information at a glance:
+```
+- Translation System (ID: translation_system_xxxxx) [HIGH] | jira: TRANS-100 | Owner: John Doe | Due: 2024-02-15 (30 days)
+```
+
 ## 目錄
 
 - [✨ Features](#features1)

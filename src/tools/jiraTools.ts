@@ -27,6 +27,7 @@ export const JiraToolSchema = z.object({
     description: z.string().optional(),
     labels: z.array(z.string()).optional(),
     metadata: z.record(z.string(), z.any()).optional(),
+    issueType: z.string().optional(), // Add support for issue type
     // Add more fields as needed for extensibility
   }).passthrough(), // Allow other fields for specific actions if needed
   options: z.object({}).passthrough().optional(), // For future extensibility
@@ -209,12 +210,208 @@ async function verifyJiraApiCredentials(): Promise<{ success: boolean; data: unk
   }
 }
 
+// Helper to list all JIRA projects
+async function listJiraProjects(): Promise<Record<string, unknown>[]> {
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const url = `${baseUrl}/rest/api/3/project`;
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+  
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+  
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`JIRA API error: ${res.status} ${errorText}`);
+  }
+  
+  const projects = await res.json() as Record<string, unknown>[];
+  return projects.map(project => ({
+    key: project.key,
+    name: project.name,
+    id: project.id,
+    projectTypeKey: project.projectTypeKey,
+    lead: (project.lead as Record<string, unknown>)?.displayName || 'Unknown'
+  }));
+}
+
+// Helper to create a JIRA epic
+async function createJiraEpic(input: JiraToolInput): Promise<unknown> {
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const { projectKey, summary, description, labels, metadata } = input.context;
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+  
+  // First, get the project details to obtain the internal ID
+  const projectUrl = `${baseUrl}/rest/api/3/project/${projectKey}`;
+  const projectRes = await fetch(projectUrl, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+  
+  if (!projectRes.ok) {
+    const errorText = await projectRes.text();
+    throw new Error(`Failed to get project details: ${projectRes.status} ${errorText}`);
+  }
+  
+  const projectData = await projectRes.json() as Record<string, unknown>;
+  const projectId = projectData.id as string;
+  
+  // Now get the epic issue type ID for this project using the internal ID
+  const issueTypesUrl = `${baseUrl}/rest/api/3/issuetype/project?projectId=${projectId}`;
+  
+  const issueTypesRes = await fetch(issueTypesUrl, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+  
+  if (!issueTypesRes.ok) {
+    throw new Error(`Failed to get issue types: ${issueTypesRes.status}`);
+  }
+  
+  const issueTypes = await issueTypesRes.json() as Record<string, unknown>[];
+  const epicType = issueTypes.find((type) => {
+    const typeName = (type as Record<string, unknown>).name as string;
+    const hierarchyLevel = (type as Record<string, unknown>).hierarchyLevel as number;
+    return typeName.toLowerCase() === 'epic' || hierarchyLevel === 1;
+  });
+  
+  if (!epicType) {
+    throw new Error(`Epic issue type not found for project ${projectKey}`);
+  }
+  
+  // Create the epic with enhanced description including project ID
+  let enhancedDescription = description || "No description provided";
+  if (metadata?.projectId) {
+    enhancedDescription += `\n\n---\nLinked Project ID: ${metadata.projectId}`;
+  }
+  
+  // Add project ID to labels
+  const enhancedLabels = [...(labels || [])];
+  if (metadata?.projectId) {
+    enhancedLabels.push(`project-${metadata.projectId}`);
+  }
+  
+  const url = `${baseUrl}/rest/api/3/issue`;
+  const body = {
+    fields: {
+      project: { key: projectKey },
+      summary: summary || "No summary provided",
+      description: toADF(enhancedDescription, metadata),
+      issuetype: { id: (epicType as Record<string, unknown>).id as string },
+      labels: enhancedLabels,
+    },
+  };
+  
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`JIRA API error: ${res.status} ${errorText}`);
+  }
+  
+  return await res.json();
+}
+
+// Helper to update JIRA issue labels
+export async function updateJiraIssueLabels(issueKey: string, newLabels: string[]): Promise<void> {
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+  
+  // First, get the current issue to retrieve existing labels
+  const issueUrl = `${baseUrl}/rest/api/3/issue/${issueKey}?fields=labels`;
+  const getRes = await fetch(issueUrl, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+  
+  if (!getRes.ok) {
+    const errorText = await getRes.text();
+    throw new Error(`Failed to get issue ${issueKey}: ${getRes.status} ${errorText}`);
+  }
+  
+  const issueData = await getRes.json() as Record<string, unknown>;
+  const fields = issueData.fields as Record<string, unknown>;
+  const existingLabels = (fields.labels || []) as string[];
+  
+  // Merge existing and new labels, removing duplicates
+  const allLabels = Array.from(new Set([...existingLabels, ...newLabels]));
+  
+  // Update the issue with the new labels
+  const updateUrl = `${baseUrl}/rest/api/3/issue/${issueKey}`;
+  const updateBody = {
+    fields: {
+      labels: allLabels
+    }
+  };
+  
+  const updateRes = await fetch(updateUrl, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updateBody),
+  });
+  
+  if (!updateRes.ok) {
+    const errorText = await updateRes.text();
+    throw new Error(`Failed to update issue ${issueKey}: ${updateRes.status} ${errorText}`);
+  }
+  
+  appendJiraToolLog(`[INFO] updateJiraIssueLabels: Successfully updated labels for ${issueKey}. Labels: ${allLabels.join(', ')}`);
+}
+
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
   appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
   switch (input.action) {
     case "create":
       if (input.domain === "ticket") {
-        const { projectKey, summary, metadata } = input.context;
+        const { projectKey, summary, metadata, issueType } = input.context;
+        
+        // If issueType is epic, use the epic creation function
+        if (issueType === 'epic') {
+          const epicRes = await createJiraEpic(input) as Record<string, unknown>;
+          const epicKey = epicRes.key as string;
+          const epicUrl = `${process.env.JIRA_BASE_URL}/browse/${epicKey}`;
+          
+          return {
+            markdown: `# Epic Created\n\nSummary: ${summary}\n\n[View in JIRA](${epicUrl})`,
+            json: {
+              key: epicKey,
+              url: epicUrl,
+              summary: summary,
+              description: input.context.description,
+              labels: input.context.labels,
+              metadata: input.context.metadata,
+              type: 'epic'
+            },
+            url: epicUrl,
+          };
+        }
+        
+        // Otherwise, create a regular task
         // 1. Check if ticket already exists (by summary/metadata)
         const localTickets = await readLocalJiraTickets(projectKey || "") as Record<string, unknown>[];
         const exists = localTickets.find(t =>
@@ -249,6 +446,23 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           markdown: `# Ticket Created\n\nSummary: ${newTicket.summary}\n\n[View in JIRA](${newTicket.url})`,
           json: newTicket,
           url: newTicket.url,
+        };
+      }
+      break;
+    case "list":
+      if (input.domain === "project") {
+        const projects = await listJiraProjects();
+        let markdown = `# Available JIRA Projects\n\n`;
+        markdown += `| Key | Name | Lead |\n`;
+        markdown += `|-----|------|------|\n`;
+        for (const project of projects) {
+          markdown += `| **${project.key}** | ${project.name} | ${project.lead} |\n`;
+        }
+        markdown += `\n*Use the project key when creating epics or tickets.*`;
+        
+        return {
+          markdown,
+          json: projects,
         };
       }
       break;
