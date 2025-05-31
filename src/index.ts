@@ -374,7 +374,7 @@ async function main() {
           { name: "checkpoint", description: loadPromptFromTemplate("toolsDescription/checkpoint.md"), inputSchema: zodToJsonSchema(checkpointSchema) },
           { name: "pull_request", description: loadPromptFromTemplate("toolsDescription/analyzePR.md"), inputSchema: zodToJsonSchema(pullRequestSchema) },
           { name: "check_env", description: "Check environment variables available to the MCP server including GITHUB_TOKEN status", inputSchema: zodToJsonSchema(checkEnvSchema) },
-          { name: "architecture_snapshot", description: "Architecture snapshot tool - analyze and document codebase structure. Create comprehensive documentation including directory structure, dependencies, configuration, and more.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
+          { name: "architecture_snapshot", description: "Architecture snapshot tool. Actions: create (analyze & document codebase), update (create new snapshot & compare), compare (diff two snapshots), list (show all snapshots). Options: depth, includeNodeModules, outputFormat. Use action parameter.", inputSchema: zodToJsonSchema(architectureSnapshotSchema) },
           { name: "jira", description: "Manages JIRA items. Actions: create (create tickets/epics), update (modify items), find (search items), list (show items), sync (sync with JIRA), verify_credentials (check auth). Domains: ticket, project, component, migration. Use action parameter.", inputSchema: zodToJsonSchema(JiraToolSchema) },
         ],
       };
