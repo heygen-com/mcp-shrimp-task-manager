@@ -404,3 +404,45 @@ Due to differences in training methods and understanding capabilities across mod
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=cjo4m06/mcp-shrimp-task-manager&type=Timeline)](https://www.star-history.com/#cjo4m06/mcp-shrimp-task-manager&Timeline)
+
+## Features
+
+- **Task Planning & Management**: Break down complex problems into manageable tasks
+- **Dependency Tracking**: Automatically manage task dependencies
+- **Complexity Assessment**: Evaluate task difficulty to optimize execution
+- **Flexible Task Updates**: Modify task details, dependencies, and related files
+- **Progress Tracking**: Monitor task completion with detailed status updates
+- **File Association**: Link tasks to specific files and code sections
+- **Search & Query**: Find tasks quickly with powerful search capabilities
+- **Batch Operations**: Create, update, or clear multiple tasks at once
+- **Smart Context Loading**: Automatically load relevant files when executing tasks
+- **Memory System**: AI agents can record and retrieve important discoveries, decisions, and patterns
+
+### Task Tools
+
+- **consult_expert**: Get help from human experts when stuck on complex problems
+- **process_thought**: Engage in structured thinking to solve complex problems
+
+### Memory Tools
+
+- **record_memory**: Record breakthroughs, decisions, feedback, errors, patterns, or preferences
+- **query_memory**: Search memories by type, project, tags, or content
+- **get_memory_chain**: Find related memories and their connections
+- **memory_maintenance**: Archive old memories, update relevance scores, get statistics
+- **memory_analytics**: Generate insights and reports about memory usage
+- **export_memories/import_memories**: Backup and restore memory data
+- **consolidate_memories**: Merge similar memories to reduce duplication
+
+## Memory System
+
+The memory system helps AI agents build long-term knowledge across sessions:
+
+- **6 Memory Types**: Breakthroughs, Decisions, Feedback, Error Recovery, Patterns, User Preferences
+- **Automatic Triggers**: Memories are suggested when completing tasks with certain keywords
+- **Project Integration**: Memories are automatically loaded when opening projects
+- **Relevance Decay**: Unused memories gradually become less prominent (30-day half-life)
+- **Duplicate Detection**: Prevents recording the same insight multiple times
+- **Memory Chains**: Link related memories to track evolving understanding
+- **Web Interface**: Visual memory explorer at `/memory-explorer.html` (when GUI enabled)
+
+See [Memory System Guide](docs/agent-memory-guide.md) for detailed usage.

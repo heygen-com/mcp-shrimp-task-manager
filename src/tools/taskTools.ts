@@ -25,6 +25,7 @@ import {
   generateTaskSummary,
 } from "../utils/summaryExtractor.js";
 import { loadTaskRelatedFiles } from "../utils/fileLoader.js";
+import { onTaskComplete } from './memory/triggers.js';
 // 導入prompt生成器
 import {
   getPlanTaskPrompt,
@@ -836,6 +837,9 @@ export async function completeTask({
       ],
     };
   }
+
+  // Trigger memory recording for task completion
+  await onTaskComplete(updatedTask, finalSummary);
 
   // 使用prompt生成器獲取最終prompt
   const prompt = getCompleteTaskPrompt({

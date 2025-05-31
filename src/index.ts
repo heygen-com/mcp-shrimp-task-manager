@@ -1,3 +1,4 @@
+import { z } from "zod";
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs'; // For file logging
@@ -30,6 +31,16 @@ const jiraUserEmail = process.env.JIRA_USER_EMAIL;
 const jiraApiTokenExists = !!process.env.JIRA_API_TOKEN;
 envResolutionLog += `JIRA_BASE_URL: ${jiraBaseUrl}\nJIRA_USER_EMAIL: ${jiraUserEmail}\nJIRA_API_TOKEN_EXISTS: ${jiraApiTokenExists}\n---\n`;
 
+// Add MCP-specific environment logging
+envResolutionLog += `MCP Environment:\n`;
+envResolutionLog += `DATA_DIR: ${process.env.DATA_DIR}\n`;
+envResolutionLog += `ENABLE_THOUGHT_CHAIN: ${process.env.ENABLE_THOUGHT_CHAIN}\n`;
+envResolutionLog += `TEMPLATES_USE: ${process.env.TEMPLATES_USE}\n`;
+envResolutionLog += `ENABLE_GUI: ${process.env.ENABLE_GUI}\n`;
+envResolutionLog += `Process argv: ${process.argv.join(' ')}\n`;
+envResolutionLog += `Working directory: ${process.cwd()}\n`;
+envResolutionLog += `---\n`;
+
 try {
   fs.appendFileSync(startupLogPath, envResolutionLog);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -54,6 +65,24 @@ import { checkBrowserLogs, checkBrowserLogsSchema, listBrowserTabs, listBrowserT
 import { translateContent, translateContentSchema } from './tools/translation/translationTool.js';
 import { retranslateI18n, retranslateI18nSchema } from './tools/translation/i18nRetranslationTool.js';
 import { consolidateTranslationMemory, consolidateTranslationMemorySchema } from './tools/translation/consolidateTranslationMemory.js';
+import { queryMemories } from './models/memoryModel.js';
+import { exportMemories, exportMemoriesSchema, importMemories, importMemoriesSchema } from './tools/memoryBackup.js';
+import {
+  recordMemory,
+  recordMemorySchema,
+  queryMemory,
+  queryMemorySchema,
+  getMemoryById,
+  updateMemoryContent,
+  updateMemorySchema,
+  deleteMemoryById,
+  deleteMemorySchema,
+  memoryMaintenance,
+  memoryMaintenanceSchema,
+  getMemoryChain,
+  getMemoryChainSchema,
+  consolidateMemoriesAction
+} from './tools/memoryTool.js';
 import {
   planTask,
   planTaskSchema,
@@ -95,6 +124,7 @@ import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.
 import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
 import { JiraToolSchema, jiraToolHandler } from "./tools/jiraTools.js";
+import { generateMemoryAnalytics, memoryAnalyticsSchema } from './tools/memoryAnalytics.js';
 
 async function main() {
   try {
@@ -106,6 +136,7 @@ async function main() {
 
       // 儲存 SSE 客戶端的列表
       let sseClients: Response[] = [];
+      let memorySSEClients: Response[] = [];
 
       // 發送 SSE 事件的輔助函數
       function sendSseUpdate() {
@@ -123,12 +154,26 @@ async function main() {
         sseClients = sseClients.filter((client) => !client.writableEnded);
       }
 
+      function sendMemoryUpdate() {
+        memorySSEClients.forEach((client) => {
+          if (!client.writableEnded) {
+            client.write(
+              `event: update\ndata: ${JSON.stringify({
+                timestamp: Date.now(),
+              })}\n\n`
+            );
+          }
+        });
+        memorySSEClients = memorySSEClients.filter((client) => !client.writableEnded);
+      }
+
       // 設置靜態文件目錄
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
       const publicPath = path.join(__dirname, "public");
       const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
       const TASKS_FILE_PATH = path.join(DATA_DIR, "tasks.json"); // 提取檔案路徑
+      const MEMORY_DIR = path.join(DATA_DIR, "memories");
 
       app.use(express.static(publicPath));
 
@@ -170,6 +215,77 @@ async function main() {
         });
       });
 
+      // Memory API endpoints
+      app.get("/api/memories", async (req: Request, res: Response) => {
+        try {
+          const allMemories = await queryMemories({});
+          res.json({ memories: allMemories });
+        } catch (error) {
+          console.error('Error loading memories:', error);
+          res.status(500).json({ error: "Failed to load memories" });
+        }
+      });
+
+      app.get("/api/memories/stream", (req: Request, res: Response) => {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+
+        res.write("data: connected\n\n");
+        memorySSEClients.push(res);
+
+        req.on("close", () => {
+          memorySSEClients = memorySSEClients.filter((client) => client !== res);
+        });
+      });
+
+      app.get("/api/memories/:id/chain", async (req: Request, res: Response) => {
+        try {
+          const result = await getMemoryChain({ 
+            memoryId: req.params.id, 
+            depth: 3,
+            includeContent: false 
+          });
+          // Parse the text response to extract chain data
+          const chain: Array<{ id: string; type: string; summary: string }> = [];
+          // TODO: Parse result.content[0].text to extract actual chain data
+          // For now, return empty chain - the result contains formatted text that needs parsing
+          console.log('Chain result received:', result.content[0].text.substring(0, 100));
+          res.json({ chain });
+        } catch (error) {
+          console.error('Error getting memory chain:', error);
+          res.status(500).json({ error: "Failed to get memory chain" });
+        }
+      });
+
+      app.get("/api/memories/export", async (req: Request, res: Response) => {
+        try {
+          const format = req.query.format as string || 'json';
+          const projectId = req.query.projectId as string || undefined;
+          
+          const result = await exportMemories({
+            format: format as 'json' | 'markdown',
+            projectId,
+            includeArchived: true
+          });
+
+          // Extract file path from result text
+          const text = result.content[0].text;
+          const pathMatch = text.match(/exported .+ to:\n(.+)\n/);
+          if (pathMatch && pathMatch[1]) {
+            const filePath = pathMatch[1];
+            res.download(filePath);
+          } else {
+            res.status(500).json({ error: "Export failed" });
+          }
+        } catch (error) {
+          console.error('Error exporting memories:', error);
+          res.status(500).json({ error: "Failed to export memories" });
+        }
+      });
+
       // 獲取可用埠
       const port = await getPort();
 
@@ -190,12 +306,21 @@ async function main() {
               }
             });
           }
+
+          // Watch memory files
+          if (fs.existsSync(MEMORY_DIR)) {
+            fs.watch(MEMORY_DIR, (eventType, filename) => {
+              if (filename && (eventType === "change" || eventType === "rename")) {
+                sendMemoryUpdate();
+              }
+            });
+          }
         } catch { /* intentionally left blank */ }
       });
 
       // 將 URL 寫入 ebGUI.md
       try {
-        const websiteUrl = `[Task Manager UI](http://localhost:${port})`;
+        const websiteUrl = `[Task Manager UI](http://localhost:${port})\n[Memory Explorer](http://localhost:${port}/memory-explorer.html)`;
         const websiteFilePath = path.join(DATA_DIR, "WebGUI.md");
         await fsPromises.writeFile(websiteFilePath, websiteUrl, "utf-8");
       } catch { /* intentionally left blank */ }
@@ -228,8 +353,15 @@ async function main() {
       }
     );
 
+    // Log MCP server creation
+    fs.appendFileSync('/tmp/mcp_shrimp_startup_debug.log', 
+      `\n[${new Date().toISOString()}] MCP Server created successfully\n`);
+
     // Restore setRequestHandler for ListTools
     server.setRequestHandler(ListToolsRequestSchema, async () => {
+      fs.appendFileSync('/tmp/mcp_shrimp_startup_debug.log', 
+        `[${new Date().toISOString()}] ListTools request received\n`);
+      
       // Define the list of tools manually
       return {
         tools: [
@@ -251,6 +383,16 @@ async function main() {
           { name: "init_project_rules", description: loadPromptFromTemplate("toolsDescription/initProjectRules.md"), inputSchema: zodToJsonSchema(initProjectRulesSchema) },
           { name: "project", description: "Unified project management tool - create, update, delete, list, open projects, and generate prompts. Use action parameter to specify operation.", inputSchema: zodToJsonSchema(projectSchema) },
           { name: "project_context", description: "Project context management - add, search, analyze, export context entries. Essential for capturing learnings, decisions, problems, and solutions.", inputSchema: zodToJsonSchema(projectContextSchema) },
+          { name: "record_memory", description: "Record a memory (breakthrough, decision, feedback, error recovery, pattern, or user preference) with automatic duplicate detection", inputSchema: zodToJsonSchema(recordMemorySchema) },
+          { name: "query_memory", description: "Query memories by type, tags, project, or search text with context-aware relevance scoring", inputSchema: zodToJsonSchema(queryMemorySchema) },
+          { name: "update_memory", description: "Update an existing memory, creating a new version while preserving the original", inputSchema: zodToJsonSchema(updateMemorySchema) },
+          { name: "delete_memory", description: "Delete a memory by ID", inputSchema: zodToJsonSchema(deleteMemorySchema) },
+          { name: "memory_maintenance", description: "Perform memory maintenance operations (archive old, decay scores, get stats)", inputSchema: zodToJsonSchema(memoryMaintenanceSchema) },
+          { name: "get_memory_chain", description: "Get a chain of related memories starting from a specific memory", inputSchema: zodToJsonSchema(getMemoryChainSchema) },
+          { name: "consolidate_memories", description: "Analyze and consolidate similar memories to reduce duplication", inputSchema: zodToJsonSchema(z.object({})) },
+          { name: "memory_analytics", description: "Generate detailed analytics and insights about memory usage patterns", inputSchema: zodToJsonSchema(memoryAnalyticsSchema) },
+          { name: "export_memories", description: "Export memories to JSON or Markdown format for backup or migration", inputSchema: zodToJsonSchema(exportMemoriesSchema) },
+          { name: "import_memories", description: "Import memories from a previously exported file", inputSchema: zodToJsonSchema(importMemoriesSchema) },
           { name: "log_data_dir", description: "Logs the absolute path to the tasks.json file being used by the task manager.", inputSchema: zodToJsonSchema(logDataDirSchema) },
           { name: "consult_expert", description: loadPromptFromTemplate("toolsDescription/consultExpert.md"), inputSchema: zodToJsonSchema(ConsultExpertInputSchema) },
           { name: "check_agent_status", description: loadPromptFromTemplate("toolsDescription/checkAgentStatus.md"), inputSchema: zodToJsonSchema(checkAgentStatusSchema) },
@@ -355,6 +497,52 @@ async function main() {
               parsedArgs = await projectContextSchema.parseAsync(request.params.arguments);
               result = await projectContext(parsedArgs);
               break;
+            case "record_memory":
+              parsedArgs = await recordMemorySchema.parseAsync(request.params.arguments);
+              result = await recordMemory(parsedArgs);
+              break;
+            case "query_memory":
+              parsedArgs = await queryMemorySchema.parseAsync(request.params.arguments);
+              result = await queryMemory(parsedArgs);
+              break;
+            case "update_memory":
+              parsedArgs = await updateMemorySchema.parseAsync(request.params.arguments);
+              result = await updateMemoryContent(parsedArgs);
+              break;
+            case "delete_memory":
+              parsedArgs = await deleteMemorySchema.parseAsync(request.params.arguments);
+              result = await deleteMemoryById(parsedArgs);
+              break;
+            case "memory_maintenance":
+              parsedArgs = await memoryMaintenanceSchema.parseAsync(request.params.arguments);
+              result = await memoryMaintenance(parsedArgs);
+              break;
+            case "get_memory":
+              if (typeof request.params.arguments.memoryId === 'string') {
+                result = await getMemoryById(request.params.arguments.memoryId);
+              } else {
+                throw new Error("memoryId must be a string");
+              }
+              break;
+            case "get_memory_chain":
+              parsedArgs = await getMemoryChainSchema.parseAsync(request.params.arguments);
+              result = await getMemoryChain(parsedArgs);
+              break;
+            case "consolidate_memories":
+              result = await consolidateMemoriesAction();
+              break;
+            case "memory_analytics":
+              parsedArgs = await memoryAnalyticsSchema.parseAsync(request.params.arguments);
+              result = await generateMemoryAnalytics(parsedArgs);
+              break;
+            case "export_memories":
+              parsedArgs = await exportMemoriesSchema.parseAsync(request.params.arguments);
+              result = await exportMemories(parsedArgs);
+              break;
+            case "import_memories":
+              parsedArgs = await importMemoriesSchema.parseAsync(request.params.arguments);
+              result = await importMemories(parsedArgs);
+              break;
             case "log_data_dir":
               await logDataDirSchema.parseAsync(request.params.arguments || {});
               result = await logDataDir();
@@ -458,11 +646,20 @@ async function main() {
 
     // 建立連接
     const transport = new StdioServerTransport();
+    
+    fs.appendFileSync('/tmp/mcp_shrimp_startup_debug.log', 
+      `[${new Date().toISOString()}] Attempting to connect via StdioServerTransport...\n`);
+    
     await server.connect(transport);
+    
+    fs.appendFileSync('/tmp/mcp_shrimp_startup_debug.log', 
+      `[${new Date().toISOString()}] MCP Server connected successfully!\n`);
 
   } catch (error) {
     // Log fatal startup errors to console/stderr
     console.error("[FATAL] Server failed to start:", error);
+    fs.appendFileSync('/tmp/mcp_shrimp_startup_debug.log', 
+      `[${new Date().toISOString()}] FATAL ERROR: ${error}\n`);
     process.exit(1);
   }
 }

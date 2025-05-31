@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "shrimp-task-manager": {
+      "command": "bash",
+      "args": ["/Users/co/dev/agents/shared/mcp-shrimp-task-manager/scripts/run-mcp.sh"],
+      "env": {
+        "DATA_DIR": "/Users/co/dev/heygen/pacific/.cursor/shrimp-data",
+        "ENABLE_THOUGHT_CHAIN": "true",
+        "TEMPLATES_USE": "en",
+        "ENABLE_GUI": "false"
+      }
+    }
+  }
+} 

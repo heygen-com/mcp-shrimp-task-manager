@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "shrimp-task-manager": {
+      "command": "node",
+      "args": [
+        "/Users/co/dev/agents/shared/mcp-shrimp-task-manager/dist/index.js"
+      ],
+      "env": {
+        "DATA_DIR": "/Users/co/dev/heygen/pacific/.cursor/shrimp-data",
+        "ENABLE_THOUGHT_CHAIN": "true",
+        "TEMPLATES_USE": "en",
+        "ENABLE_GUI": "false"
+      }
+    }
+  }
+} 
