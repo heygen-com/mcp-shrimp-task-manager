@@ -666,4 +666,31 @@ export async function findProjectBySemanticMatch(query: string): Promise<Project
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) return matches; // Let caller handle multiple
   return null;
+}
+
+// Helper to get path to active project file
+function getActiveProjectFilePath() {
+  return path.join(DATA_DIR, "active_project.json");
+}
+
+// Set active project
+export async function setActiveProject(projectId: string, projectName: string) {
+  const activeProject = {
+    projectId,
+    projectName,
+    openedAt: new Date().toISOString(),
+  };
+  const filePath = getActiveProjectFilePath();
+  await fs.writeFile(filePath, JSON.stringify(activeProject, null, 2));
+}
+
+// Get active project
+export async function getActiveProject(): Promise<{ projectId: string, projectName: string, openedAt: string } | null> {
+  const filePath = getActiveProjectFilePath();
+  try {
+    const data = await fs.readFile(filePath, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
 } 

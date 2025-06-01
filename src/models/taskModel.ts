@@ -14,6 +14,7 @@ import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { getActiveProject } from "./projectModel.js";
 
 // 確保獲取專案資料夾路徑
 const __filename = fileURLToPath(import.meta.url);
@@ -26,6 +27,35 @@ const TASKS_FILE = path.join(DATA_DIR, "tasks.json");
 
 // 將exec轉換為Promise形式
 const execPromise = promisify(exec);
+
+// Helper to get project task file path
+function getProjectTaskFilePath(projectId: string, taskId: string) {
+  return path.join(DATA_DIR, "projects", projectId, "tasks", `${taskId}.json`);
+}
+
+// Write a single project task file
+async function writeProjectTaskFile(projectId: string, task: Task) {
+  const filePath = getProjectTaskFilePath(projectId, task.id);
+  await fs.writeFile(filePath, JSON.stringify(task, null, 2));
+}
+
+// Read all project tasks
+async function readAllProjectTasks(projectId: string): Promise<Task[]> {
+  const tasksDir = path.join(DATA_DIR, "projects", projectId, "tasks");
+  try {
+    const files = await fs.readdir(tasksDir);
+    const tasks: Task[] = [];
+    for (const file of files) {
+      if (file.endsWith('.json')) {
+        const data = await fs.readFile(path.join(tasksDir, file), "utf-8");
+        tasks.push(JSON.parse(data));
+      }
+    }
+    return tasks;
+  } catch {
+    return [];
+  }
+}
 
 // 確保數據目錄存在
 async function ensureDataDir() {
@@ -86,9 +116,14 @@ async function writeTasks(tasks: Task[]): Promise<void> {
   await fs.writeFile(TASKS_FILE, JSON.stringify({ tasks }, null, 2));
 }
 
-// 獲取所有任務
+// Override getAllTasks to support project-scoped retrieval
 export async function getAllTasks(): Promise<Task[]> {
-  return await readTasks();
+  const activeProject = await getActiveProject();
+  if (activeProject && activeProject.projectId) {
+    return await readAllProjectTasks(activeProject.projectId);
+  } else {
+    return await readTasks();
+  }
 }
 
 // 根據ID獲取任務
@@ -97,7 +132,7 @@ export async function getTaskById(taskId: string): Promise<Task | null> {
   return tasks.find((task) => task.id === taskId) || null;
 }
 
-// 創建新任務
+// Override createTask to support project-scoped storage
 export async function createTask(
   name: string,
   description: string,
@@ -105,12 +140,9 @@ export async function createTask(
   dependencies: string[] = [],
   relatedFiles?: RelatedFile[]
 ): Promise<Task> {
-  const tasks = await readTasks();
-
-  const dependencyObjects: TaskDependency[] = dependencies.map((taskId) => ({
-    taskId,
-  }));
-
+  // Check for active project
+  const activeProject = await getActiveProject();
+  const dependencyObjects: TaskDependency[] = dependencies.map((taskId) => ({ taskId }));
   const newTask: Task = {
     id: uuidv4(),
     name,
@@ -122,11 +154,17 @@ export async function createTask(
     updatedAt: new Date(),
     relatedFiles,
   };
-
-  tasks.push(newTask);
-  await writeTasks(tasks);
-
-  return newTask;
+  if (activeProject && activeProject.projectId) {
+    // Store as project task file
+    await writeProjectTaskFile(activeProject.projectId, newTask);
+    return newTask;
+  } else {
+    // Fallback to global tasks.json
+    const tasks = await readTasks();
+    tasks.push(newTask);
+    await writeTasks(tasks);
+    return newTask;
+  }
 }
 
 // 更新任務

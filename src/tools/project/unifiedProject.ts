@@ -6,6 +6,7 @@ import {
   deleteProject as deleteProjectModel,
   generateProjectStarterPrompt,
   findProjectBySemanticMatch,
+  setActiveProject,
 } from "../../models/projectModel.js";
 import { Project, ProjectStatus, TrackerType, ProjectPriority, ProjectCategory } from "../../types/index.js";
 import { queryMemories } from "../../models/memoryModel.js";
@@ -191,155 +192,16 @@ export async function project(params: z.infer<typeof projectSchema>) {
       }
         
       case "open": {
-        let projectId = params.projectId || '';
-        let prompt = await generateProjectStarterPrompt(projectId);
-        if (!prompt) {
-          let searchName = projectId;
-          if (!searchName && params.name) searchName = params.name;
-          if (searchName) {
-            const match = await findProjectBySemanticMatch(searchName);
-            if (Array.isArray(match)) {
-              const list = match.map(p => `- **${p.name}** (ID: ${p.id})`).join('\n');
-              return { content: [{ type: "text", text: `No exact project found for '${searchName}', but found these candidates:\n\n${list}\n\nPlease specify the project ID or a more specific name.` }] };
-            } else if (match) {
-              projectId = match.id;
-              prompt = await generateProjectStarterPrompt(projectId);
-            } else {
-              return { content: [{ type: "text", text: `Project not found: ${searchName}` }] };
-            }
-          } else {
-            return { content: [{ type: "text", text: `Project not found: ${projectId}` }] };
-          }
+        if (!params.projectId) {
+          return { content: [{ type: "text", text: "❌ projectId is required to open a project." }] };
         }
-        
-        // Load the project to get its tags and description
-        const projects = await getAllProjects();
-        const currentProject = projects.find(p => p.id === projectId);
-        
-        // Load memories associated with this project
-        try {
-          // First, get memories directly associated with this project
-          const projectMemories = await queryMemories({
-            filters: {
-              projectId: projectId,
-              archived: false
-            },
-            sortBy: 'relevance',
-            limit: 10 // Load top 10 most relevant memories
-          });
-          
-          // Then, search for memories by matching tags and content
-          let tagBasedMemories: typeof projectMemories = [];
-          if (currentProject) {
-            // Check if this is a localization/i18n project
-            const isLocalizationProject = 
-              currentProject.tags?.some(tag => 
-                ['i18n', 'localization', 'translation', 'internationalization'].includes(tag.toLowerCase())
-              ) ||
-              currentProject.name.toLowerCase().includes('i18n') ||
-              currentProject.name.toLowerCase().includes('localization') ||
-              currentProject.name.toLowerCase().includes('translation') ||
-              currentProject.description?.toLowerCase().includes('i18n') ||
-              currentProject.description?.toLowerCase().includes('localization') ||
-              currentProject.description?.toLowerCase().includes('translation');
-            
-            if (isLocalizationProject) {
-              // Search for localization-related memories
-              const localizationMemories = await queryMemories({
-                filters: {
-                  tags: ['i18n', 'localization', 'translation', 'ICU'],
-                  archived: false
-                },
-                sortBy: 'relevance',
-                limit: 5
-              });
-              tagBasedMemories = localizationMemories.filter(m => !m.projectId || m.projectId !== projectId);
-            } else if (currentProject.tags && currentProject.tags.length > 0) {
-              // For other projects, search by matching tags
-              const tagMemories = await queryMemories({
-                filters: {
-                  tags: currentProject.tags,
-                  archived: false
-                },
-                sortBy: 'relevance',
-                limit: 5
-              });
-              tagBasedMemories = tagMemories.filter(m => !m.projectId || m.projectId !== projectId);
-            }
-          }
-          
-          // Combine and deduplicate memories
-          const allMemories = [...projectMemories];
-          const seenIds = new Set(projectMemories.map(m => m.id));
-          for (const memory of tagBasedMemories) {
-            if (!seenIds.has(memory.id)) {
-              allMemories.push(memory);
-              seenIds.add(memory.id);
-            }
-          }
-          
-          if (allMemories.length > 0) {
-            prompt += `\n\n## 📚 Project Memory Context\n\n`;
-            
-            // Separate project-specific and global memories
-            const directMemories = allMemories.filter(m => m.projectId === projectId);
-            const globalMemories = allMemories.filter(m => !m.projectId || m.projectId !== projectId);
-            
-            if (directMemories.length > 0) {
-              prompt += `### Project-Specific Memories (${directMemories.length})\n\n`;
-              
-              // Group memories by type
-              const memoryByType = directMemories.reduce((acc, memory) => {
-                if (!acc[memory.type]) acc[memory.type] = [];
-                acc[memory.type].push(memory);
-                return acc;
-              }, {} as Record<MemoryType, typeof directMemories>);
-              
-              // Display memories grouped by type
-              for (const [type, memories] of Object.entries(memoryByType)) {
-                prompt += `#### ${type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')}\n`;
-                for (const memory of memories) {
-                  prompt += `- **${memory.summary}** (${new Date(memory.created).toLocaleDateString()})\n`;
-                  if (memory.tags.length > 0) {
-                    prompt += `  Tags: ${memory.tags.join(', ')}\n`;
-                  }
-                  prompt += `  Relevance: ${(memory.relevanceScore * 100).toFixed(0)}%\n\n`;
-                }
-              }
-            }
-            
-            if (globalMemories.length > 0) {
-              prompt += `### Related Global Memories (${globalMemories.length})\n\n`;
-              prompt += `*These memories match your project's context and may be helpful:*\n\n`;
-              
-              // Group global memories by type
-              const globalByType = globalMemories.reduce((acc, memory) => {
-                if (!acc[memory.type]) acc[memory.type] = [];
-                acc[memory.type].push(memory);
-                return acc;
-              }, {} as Record<MemoryType, typeof globalMemories>);
-              
-              // Display global memories
-              for (const [type, memories] of Object.entries(globalByType)) {
-                prompt += `#### ${type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')}\n`;
-                for (const memory of memories) {
-                  prompt += `- **${memory.summary}**\n`;
-                  if (memory.tags.length > 0) {
-                    prompt += `  Tags: ${memory.tags.join(', ')}\n`;
-                  }
-                  prompt += `  Relevance: ${(memory.relevanceScore * 100).toFixed(0)}%\n\n`;
-                }
-              }
-            }
-            
-            prompt += `\n💡 *Use 'query_memory' to explore specific memories in detail.*\n`;
-          }
-        } catch (error) {
-          console.error('Error loading project memories:', error);
-          // Continue without memories if there's an error
+        const project = await getAllProjects().then(projects => projects.find(p => p.id === params.projectId));
+        if (!project) {
+          return { content: [{ type: "text", text: `❌ Project ${params.projectId} not found.` }] };
         }
-        
-        return { content: [{ type: "text", text: prompt }] };
+        // Set as active project
+        await setActiveProject(project.id, project.name);
+        return { content: [{ type: "text", text: `✅ Project '${project.name}' is now active.` }] };
       }
         
       case "generate_prompt": {
