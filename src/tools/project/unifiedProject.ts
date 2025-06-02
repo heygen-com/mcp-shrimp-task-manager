@@ -5,12 +5,11 @@ import {
   updateProject as updateProjectModel,
   deleteProject as deleteProjectModel,
   generateProjectStarterPrompt,
-  findProjectBySemanticMatch,
   setActiveProject,
+  renameProject,
 } from "../../models/projectModel.js";
-import { Project, ProjectStatus, TrackerType, ProjectPriority, ProjectCategory } from "../../types/index.js";
-import { queryMemories } from "../../models/memoryModel.js";
-import { MemoryType } from "../../types/memory.js";
+import { Project, ProjectStatus, TrackerType, ProjectPriority, ProjectCategory, Task, ProjectContext, ProjectInsight, TaskStatus } from "../../types/index.js";
+import { Memory } from "../../types/memory.js";
 
 // Define the unified schema
 export const projectSchema = z.object({
@@ -23,7 +22,9 @@ export const projectSchema = z.object({
     "generate_prompt",
     "system_check",
     "link_jira",
-    "list_jira_projects"
+    "list_jira_projects",
+    "rename",
+    "help"
   ]).describe("Action to perform"),
   
   // For create action
@@ -78,7 +79,7 @@ export const projectSchema = z.object({
   includeStats: z.boolean().optional().default(false).describe("Include statistics"),
   
   // For open action
-  includeFullContext: z.boolean().optional().default(false).describe("Include recent context entries"),
+  includeFullContext: z.boolean().optional().default(true).describe("Include recent context entries"),
   
   // For wizard mode
   wizardStep: z.string().optional().describe("Current wizard step"),
@@ -87,7 +88,30 @@ export const projectSchema = z.object({
   // For JIRA integration
   jiraProjectKey: z.string().optional().describe("JIRA project key for epic creation (e.g., 'TRANS', 'EP')"),
   createEpic: z.boolean().optional().describe("Whether to create a JIRA epic"),
+  
+  // For rename action
+  newName: z.string().optional().describe("New semantic project name (required for rename)"),
 }).describe("Unified project management tool");
+
+// Project tool actions overview for agent context
+export const projectToolActionsOverview = `
+# Project Tool Actions
+
+| Action           | Parameters                        | Description                                      | Example Usage                                 |
+|------------------|-----------------------------------|--------------------------------------------------|-----------------------------------------------|
+| create           | name*, description, tags, ...     | Create a new project                             | project create --name "My Project"            |
+| open             | projectId OR name                 | Open a project by ID or fuzzy name/tags          | project open --name "localization"            |
+| list             | status, includeFullContext        | List all projects (optionally filter by status)  | project list                                   |
+| update           | projectId, updates                | Update project fields                            | project update --projectId <id> --updates ...  |
+| delete           | projectId                         | Delete a project                                 | project delete --projectId <id>                |
+| rename           | projectId, newName                | Rename a project (folder & metadata)             | project rename --projectId <id> --newName ...  |
+| generate_prompt  | projectId                         | Generate starter prompt for a project            | project generate_prompt --projectId <id>       |
+| link_jira        | projectId, jiraProjectKey         | Link project to a JIRA epic                      | project link_jira --projectId <id> ...         |
+| list_jira_projects|                                   | List all JIRA projects                           | project list_jira_projects                     |
+| help             |                                   | Show this actions overview                       | project help                                   |
+
+*Parameters marked with * are required. Most actions accept additional metadata fields (see schema).
+`;
 
 /**
  * Unified project management tool
@@ -192,16 +216,213 @@ export async function project(params: z.infer<typeof projectSchema>) {
       }
         
       case "open": {
-        if (!params.projectId) {
-          return { content: [{ type: "text", text: "❌ projectId is required to open a project." }] };
+        let projectIdToOpen = params.projectId;
+        let project = null;
+        const queryName = typeof params.name === 'string' ? params.name : undefined;
+        const allProjects = await getAllProjects();
+        // Fuzzy open logic
+        if (!projectIdToOpen && queryName) {
+          // Try exact match first
+          const exact = allProjects.find(p => p.name.toLowerCase() === queryName.toLowerCase());
+          if (exact) {
+            projectIdToOpen = exact.id;
+            project = exact;
+          } else {
+            // Fuzzy match by name, tags, or description
+            const query = queryName.toLowerCase();
+            const candidates = allProjects.filter(p =>
+              p.name.toLowerCase().includes(query) ||
+              (p.tags && p.tags.some(tag => tag.toLowerCase().includes(query))) ||
+              (p.description && p.description.toLowerCase().includes(query))
+            );
+            if (candidates.length === 1) {
+              projectIdToOpen = candidates[0].id;
+              project = candidates[0];
+            } else if (candidates.length > 1) {
+              let list = `Multiple projects match your query '${queryName}':\n`;
+              for (const p of candidates) {
+                list += `- **${p.name}** (ID: ${p.id})\n`;
+              }
+              list += `\nPlease specify the projectId to open.`;
+              return { content: [{ type: "text", text: list }] };
+            } else {
+              return { content: [{ type: "text", text: `❌ No project found matching '${queryName}'.` }] };
+            }
+          }
         }
-        const project = await getAllProjects().then(projects => projects.find(p => p.id === params.projectId));
+        if (!projectIdToOpen) {
+          return { content: [{ type: "text", text: "❌ projectId or name is required to open a project." }] };
+        }
         if (!project) {
-          return { content: [{ type: "text", text: `❌ Project ${params.projectId} not found.` }] };
+          project = allProjects.find(p => p.id === projectIdToOpen);
+        }
+        if (!project) {
+          return { content: [{ type: "text", text: `❌ Project ${projectIdToOpen} not found.` }] };
         }
         // Set as active project
         await setActiveProject(project.id, project.name);
-        return { content: [{ type: "text", text: `✅ Project '${project.name}' is now active.` }] };
+        if (params.includeFullContext !== false) {
+          // Load full context and memory files, and generate markdown
+          const [contexts, insights, tasks]: [ProjectContext[], ProjectInsight[], Task[]] = await Promise.all([
+            import("../../models/projectModel.js").then(m => m.getProjectContexts(project.id)),
+            import("../../models/projectModel.js").then(m => m.getProjectInsights(project.id)),
+            import("../../models/projectModel.js").then(m => m.getProjectTasks(project.id)),
+          ]);
+
+          // --- Project Memory Context Injection (moved up to fix build error) ---
+          const { queryMemories } = await import("../../models/memoryModel.js");
+          const projectTags = (project.tags || []).map(t => t.toLowerCase());
+          const isLocalization = projectTags.some(t => ["i18n", "localization", "translation", "internationalization"].includes(t))
+            || /i18n|localization|translation/.test(project.name.toLowerCase())
+            || /i18n|localization|translation/.test(project.description.toLowerCase());
+          let fuzzyTags = [...projectTags];
+          if (isLocalization) {
+            fuzzyTags = Array.from(new Set([...fuzzyTags, "i18n", "localization", "translation", "ICU"]));
+          }
+          let allMemories: Memory[] = [];
+          let memoryError = null;
+          try {
+            allMemories = await queryMemories({});
+            await logDebug(`Loaded ${allMemories.length} total memories for project ${project.id}`);
+          } catch (err) {
+            memoryError = err instanceof Error ? err.message : String(err);
+            await logDebug(`Error loading memories: ${memoryError}`);
+          }
+          const projectMemories = allMemories.filter((m: Memory) => m.projectId === project.id);
+          const tagMatchedMemories = allMemories.filter((m: Memory) =>
+            m.projectId !== project.id && m.tags && m.tags.some((tag: string) => fuzzyTags.includes(tag.toLowerCase()))
+          );
+          await logDebug(`Project ${project.id}: ${projectMemories.length} project-specific memories, ${tagMatchedMemories.length} tag-matched memories`);
+
+          let markdown = `# Project: ${project.name}\n\n`;
+          markdown += `## Description\n${project.description}\n\n`;
+          if (project.goals && project.goals.length > 0) {
+            markdown += `## Goals\n`;
+            project.goals.forEach((goal: string) => {
+              markdown += `- ${goal}\n`;
+            });
+            markdown += `\n`;
+          }
+          if (insights && insights.length > 0) {
+            markdown += `## Key Insights\n`;
+            insights.slice(0, 5).forEach(insight => {
+              markdown += `### ${insight.title} (${insight.impact} impact)\n`;
+              markdown += `${insight.description}\n\n`;
+            });
+          }
+          if (contexts.length > 0) {
+            markdown += `## Important Context\n`;
+            const importantContexts = contexts.filter(c =>
+              c.tags?.includes("important") ||
+              (!c.tags?.includes("code-change") && c.type !== "reference")
+            ).slice(0, 5);
+            importantContexts.forEach(context => {
+              const preview = context.content.length > 200
+                ? context.content.substring(0, 200) + "..."
+                : context.content;
+              markdown += `- **${context.type}**: ${preview}\n`;
+            });
+            markdown += `\n`;
+          }
+          // Referenced Files
+          const fileRefs = contexts.filter(c => c.tags?.includes("file-reference"));
+          if (fileRefs.length > 0) {
+            markdown += `## Referenced Files\n`;
+            fileRefs.forEach(ref => {
+              const lines = ref.content.split('\n');
+              markdown += `- ${lines[0]}\n`;
+              if (lines[1]) markdown += `  ${lines[1]}\n`;
+            });
+            markdown += `\n`;
+          }
+          const incompleteTasks = tasks.filter((t: Task) => t.status !== TaskStatus.COMPLETED);
+          if (incompleteTasks.length > 0) {
+            markdown += `## Current Tasks\n`;
+            incompleteTasks.slice(0, 10).forEach((task: Task) => {
+              markdown += `- [ ] **${task.name}**: ${task.description}\n`;
+              if (task.notes) {
+                markdown += `  Notes: ${task.notes.substring(0, 100)}${task.notes.length > 100 ? '...' : ''}\n`;
+              }
+            });
+            markdown += `\n`;
+          }
+          markdown += `## Project Metadata\n`;
+          markdown += `- **Status**: ${project.status}\n`;
+          if (project.priority) {
+            markdown += `- **Priority**: ${project.priority}\n`;
+          }
+          if (project.category) {
+            markdown += `- **Category**: ${project.category}\n`;
+          }
+          markdown += `- **Created**: ${project.createdAt.toISOString()}\n`;
+          markdown += `- **Last Updated**: ${project.updatedAt.toISOString()}\n`;
+          markdown += `- **Total Contexts**: ${contexts.length}\n`;
+          markdown += `- **Total Memories**: ${allMemories.length}\n`;
+          markdown += `- **Total Insights**: ${insights.length}\n`;
+          markdown += `- **Total Tasks**: ${tasks.length}\n`;
+          if (project.tags && project.tags.length > 0) {
+            markdown += `- **Tags**: ${project.tags.join(", ")}\n`;
+          }
+          if (project.externalTracker) {
+            markdown += `\n### External Tracker\n`;
+            markdown += `- **Type**: ${project.externalTracker.type.toUpperCase()}\n`;
+            markdown += `- **Issue**: ${project.externalTracker.issueKey}`;
+            if (project.externalTracker.issueType) {
+              markdown += ` (${project.externalTracker.issueType})`;
+            }
+            markdown += `\n`;
+            if (project.externalTracker.url) {
+              markdown += `- **URL**: ${project.externalTracker.url}\n`;
+            }
+          }
+          // --- Appendix: Referenced File Contents ---
+          const fs = await import("fs/promises");
+          let appendix = "";
+          for (const ref of fileRefs) {
+            const lines = ref.content.split('\n');
+            const filePath = lines[0].trim();
+            if (filePath.endsWith('.md')) {
+              try {
+                // Only try to read if file exists
+                await fs.access(filePath);
+                const fileContent = await fs.readFile(filePath, "utf-8");
+                appendix += `\n---\n### Appendix: ${filePath}\n`;
+                if (lines[1]) appendix += `*${lines[1].trim()}*\n`;
+                appendix += `\n\n` + fileContent + `\n`;
+              } catch {
+                // Skip files that cannot be accessed or read
+              }
+            }
+          }
+          if (appendix) {
+            markdown += `\n## Appendix: Referenced File Contents\n` + appendix;
+          }
+          // --- Project Memory Context Injection ---
+          // Section output
+          markdown += `\n## 📚 Project Memories\n`;
+          // --- Confirmation prompt with memory summary ---
+          let memorySummary = "";
+          if (memoryError) {
+            memorySummary = `Error loading memories: ${memoryError}\n`;
+          } else if (projectMemories.length === 0 && tagMatchedMemories.length === 0) {
+            memorySummary = `No relevant memories found for this project.\n`;
+          } else {
+            memorySummary = `Relevant Memories:\n`;
+            for (const mem of projectMemories) {
+              memorySummary += `- ${mem.summary} [${mem.type}] (${new Date(mem.created).toLocaleDateString()}) | Tags: ${mem.tags.join(", ")}\n`;
+            }
+            for (const mem of tagMatchedMemories) {
+              memorySummary += `- ${mem.summary} [${mem.type}] (${new Date(mem.created).toLocaleDateString()}) | Tags: ${mem.tags.join(", ")}\n`;
+            }
+          }
+          // Respond with both the markdown and the memory summary in the main confirmation
+          return { content: [
+            { type: "text", text: markdown },
+            { type: "text", text: `\n---\n\n${memorySummary}` }
+          ] };
+        } else {
+          return { content: [{ type: "text", text: `✅ Project '${project.name}' is now active.` }] };
+        }
       }
         
       case "generate_prompt": {
@@ -301,6 +522,34 @@ export async function project(params: z.infer<typeof projectSchema>) {
         }
       }
         
+      case "rename": {
+        if (!params.projectId || !params.newName) {
+          return { content: [{ type: "text", text: "❌ projectId and newName are required for renaming a project." }] };
+        }
+        try {
+          const updatedProject = await renameProject(params.projectId, params.newName);
+          // Generate markdown summary
+          let markdown = `# Project Renamed\n\n`;
+          markdown += `**New Name:** ${updatedProject.name}\n`;
+          markdown += `**New ID:** ${updatedProject.id}\n`;
+          markdown += `**Description:** ${updatedProject.description}\n`;
+          markdown += `**Status:** ${updatedProject.status}\n`;
+          markdown += `**Created:** ${updatedProject.createdAt.toISOString()}\n`;
+          markdown += `**Last Updated:** ${updatedProject.updatedAt.toISOString()}\n`;
+          if (updatedProject.tags && updatedProject.tags.length > 0) {
+            markdown += `**Tags:** ${updatedProject.tags.join(", ")}\n`;
+          }
+          return { content: [{ type: "text", text: markdown }] };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { content: [{ type: "text", text: `❌ Failed to rename project: ${errorMessage}` }] };
+        }
+      }
+        
+      case "help": {
+        return { content: [{ type: "text", text: projectToolActionsOverview }] };
+      }
+        
       default:
         return {
           content: [{
@@ -327,4 +576,13 @@ export async function project(params: z.infer<typeof projectSchema>) {
 async function handleSystemCheck() {
   // Remove or implement handleSystemCheck as needed. For now, return a placeholder.
   return { content: [{ type: "text", text: "System check not implemented." }] };
+}
+
+// --- Logging helper ---
+const logPath = "/tmp/mcp_project_open_debug.log";
+async function logDebug(msg: string) {
+  try {
+    const fsLog = await import("fs/promises");
+    await fsLog.appendFile(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {/* intentionally empty */}
 }
