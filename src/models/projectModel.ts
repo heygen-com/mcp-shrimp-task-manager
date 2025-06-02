@@ -495,6 +495,9 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
   const insights = await getProjectInsights(projectId);
   const tasks = await getProjectTasks(projectId);
   
+  // Read project files
+  const { fileContents, missingFiles, errors } = await readProjectFiles(projectId);
+  
   let prompt = `# Project: ${project.name}\n\n`;
   prompt += `## Description\n${project.description}\n\n`;
   
@@ -506,6 +509,7 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
     prompt += `\n`;
   }
   
+  // Key Insights, Code Changes, Important Context, Referenced Files, Current Tasks (Order remains)
   if (insights && insights.length > 0) {
     prompt += `## Key Insights\n`;
     insights.slice(0, 5).forEach(insight => {
@@ -513,24 +517,20 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
       prompt += `${insight.description}\n\n`;
     });
   }
-  
-  // Add code changes with diffs
   const codeChanges = contexts.filter(c => c.tags?.includes("code-change"));
   if (codeChanges.length > 0) {
     prompt += `## Code Changes\n`;
     codeChanges.forEach(change => {
-      prompt += `### ${change.content.split('\n')[0]}\n`; // First line as title
+      prompt += `### ${change.content.split('\n')[0]}\n`;
       prompt += `${change.content}\n\n`;
     });
   }
-  
   if (contexts.length > 0) {
     prompt += `## Important Context\n`;
     const importantContexts = contexts.filter(c => 
       c.tags?.includes("important") || 
       (!c.tags?.includes("code-change") && c.type !== "reference")
     ).slice(0, 5);
-    
     importantContexts.forEach(context => {
       const preview = context.content.length > 200 
         ? context.content.substring(0, 200) + "..."
@@ -539,19 +539,16 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
     });
     prompt += `\n`;
   }
-  
-  // Add file references
   const fileReferences = contexts.filter(c => c.tags?.includes("file-reference"));
   if (fileReferences.length > 0) {
     prompt += `## Referenced Files\n`;
     fileReferences.forEach(ref => {
       const lines = ref.content.split('\n');
-      prompt += `- ${lines[0]}\n`; // File path
-      if (lines[1]) prompt += `  ${lines[1]}\n`; // Description
+      prompt += `- ${lines[0]}\n`;
+      if (lines[1]) prompt += `  ${lines[1]}\n`;
     });
     prompt += `\n`;
   }
-  
   const incompleteTasks = tasks.filter(t => t.status !== TaskStatus.COMPLETED);
   if (incompleteTasks.length > 0) {
     prompt += `## Current Tasks\n`;
@@ -564,7 +561,7 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
     prompt += `\n`;
   }
   
-  // Add project metadata
+  // Project Metadata and Details
   prompt += `## Project Metadata\n`;
   prompt += `- **Status**: ${project.status}\n`;
   if (project.priority) {
@@ -578,11 +575,12 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
   prompt += `- **Total Contexts**: ${contexts.length}\n`;
   prompt += `- **Total Insights**: ${insights.length}\n`;
   prompt += `- **Total Tasks**: ${tasks.length}\n`;
+  if (project.files && project.files.length > 0) {
+    prompt += `- **Project Files**: ${project.files.length} files (${fileContents.length} readable)\n`;
+  }
   if (project.tags && project.tags.length > 0) {
     prompt += `- **Tags**: ${project.tags.join(", ")}\n`;
   }
-  
-  // Add external tracker info
   if (project.externalTracker) {
     prompt += `\n### External Tracker\n`;
     prompt += `- **Type**: ${project.externalTracker.type.toUpperCase()}\n`;
@@ -595,8 +593,6 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
       prompt += `- **URL**: ${project.externalTracker.url}\n`;
     }
   }
-  
-  // Add project details
   if (project.metadata) {
     prompt += `\n### Project Details\n`;
     if (project.metadata.owner) {
@@ -620,9 +616,43 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
       prompt += `- **Actual Hours**: ${project.metadata.actualHours}\n`;
     }
   }
-  
   prompt += `\n`;
   
+  // --- Appendix for Included Project Files (from project.files array) ---
+  let projectFilesAppendix = "";
+  if (fileContents.length > 0 || missingFiles.length > 0 || errors.length > 0) {
+    projectFilesAppendix += "\n---\n## Appendix: Included Project Files\n";
+  }
+
+  if (fileContents.length > 0) {
+    projectFilesAppendix += `\n### Successfully Loaded Files (${fileContents.length}):\n`;
+    fileContents.forEach(file => {
+      projectFilesAppendix += `\n#### ${file.path}\n`;
+      projectFilesAppendix += `\`\`\`\n${file.content}\n\`\`\`\n`;
+    });
+  }
+  
+  if (missingFiles.length > 0 || errors.length > 0) {
+    projectFilesAppendix += `\n### ⚠️ File Issues\n`;
+    if (missingFiles.length > 0) {
+      projectFilesAppendix += `\n**Missing Files (${missingFiles.length}):**\n`;
+      missingFiles.forEach(file => {
+        projectFilesAppendix += `- ❌ ${file}\n`;
+      });
+    }
+    if (errors.length > 0) {
+      projectFilesAppendix += `\n**File Read Errors (${errors.length}):**\n`;
+      errors.forEach(error => {
+        projectFilesAppendix += `- ⚠️ ${error.path}: ${error.error}\n`;
+      });
+    }
+  }
+  
+  // Append the project files appendix at the very end
+  if (projectFilesAppendix) {
+    prompt += projectFilesAppendix;
+  }
+
   // Save the prompt as a markdown file in the project directory
   const { projectDir } = getProjectPaths(projectId);
   const promptFile = path.join(projectDir, `starter-prompt-${new Date().toISOString().split('T')[0]}.md`);
@@ -700,7 +730,9 @@ const RENAME_LOG_PATH = "/tmp/mcp_project_rename_debug.log";
 async function logRenameDebug(msg: string) {
   try {
     await fs.appendFile(RENAME_LOG_PATH, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
+  } catch {
+    // Ignore logging errors
+  }
 }
 
 /**
@@ -752,4 +784,122 @@ export async function renameProject(
   // Optionally, update any other references in the system (e.g., memory, reports)
 
   return updatedProject;
+}
+
+// Read project files and handle missing files
+export async function readProjectFiles(projectId: string): Promise<{
+  fileContents: Array<{ path: string; content: string; }>;
+  missingFiles: string[];
+  errors: Array<{ path: string; error: string; }>;
+}> {
+  const project = await readProjectMetadata(projectId);
+  if (!project || !project.files || project.files.length === 0) {
+    return { fileContents: [], missingFiles: [], errors: [] };
+  }
+
+  const fileContents: Array<{ path: string; content: string; }> = [];
+  const missingFiles: string[] = [];
+  const errors: Array<{ path: string; error: string; }> = [];
+
+  for (const filePath of project.files) {
+    try {
+      // Ensure path is absolute
+      const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+      
+      // Check if file exists and is readable
+      await fs.access(absolutePath, fs.constants.R_OK);
+      
+      // Read file content
+      const content = await fs.readFile(absolutePath, 'utf-8');
+      fileContents.push({ path: absolutePath, content });
+      
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      
+      if (errorMessage.includes('ENOENT') || errorMessage.includes('no such file')) {
+        missingFiles.push(filePath);
+      } else {
+        errors.push({ path: filePath, error: errorMessage });
+      }
+    }
+  }
+
+  return { fileContents, missingFiles, errors };
+}
+
+// Add file to project files array
+export async function addProjectFile(projectId: string, filePath: string): Promise<boolean> {
+  const project = await readProjectMetadata(projectId);
+  if (!project) {
+    return false;
+  }
+
+  // Convert to absolute path if relative
+  const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+  
+  // Check if file exists
+  try {
+    await fs.access(absolutePath, fs.constants.R_OK);
+  } catch {
+    throw new Error(`File not found or not readable: ${absolutePath}`);
+  }
+
+  // Initialize files array if it doesn't exist
+  if (!project.files) {
+    project.files = [];
+  }
+
+  // Check if file is already in the list
+  if (project.files.includes(absolutePath)) {
+    return false; // Already exists
+  }
+
+  // Add file to project
+  project.files.push(absolutePath);
+  await updateProject(projectId, { files: project.files });
+  
+  return true;
+}
+
+// Remove file from project files array
+export async function removeProjectFile(projectId: string, filePath: string): Promise<boolean> {
+  const project = await readProjectMetadata(projectId);
+  if (!project || !project.files) {
+    return false;
+  }
+
+  // Convert to absolute path if relative for comparison
+  const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+  
+  // Find and remove file from array
+  const initialLength = project.files.length;
+  project.files = project.files.filter(f => f !== absolutePath && f !== filePath);
+  
+  if (project.files.length === initialLength) {
+    return false; // File not found in list
+  }
+
+  await updateProject(projectId, { files: project.files });
+  return true;
+}
+
+// Normalize relative paths to absolute in project files
+export async function normalizeProjectFilePaths(projectId: string): Promise<void> {
+  const project = await readProjectMetadata(projectId);
+  if (!project || !project.files || project.files.length === 0) {
+    return;
+  }
+
+  let hasChanges = false;
+  const normalizedFiles = project.files.map(filePath => {
+    if (!path.isAbsolute(filePath)) {
+      hasChanges = true;
+      return path.resolve(filePath);
+    }
+    return filePath;
+  });
+
+  if (hasChanges) {
+    await updateProject(projectId, { files: normalizedFiles });
+  }
 } 

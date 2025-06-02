@@ -248,6 +248,7 @@ export interface Project {
   externalTracker?: ExternalTracker; // External tracker integration
   metadata?: ProjectMetadata; // Additional project metadata
   milestones?: ProjectMilestone[]; // Project milestones
+  files?: string[]; // Absolute paths to files that should be included in project context
 }
 
 // Project context types

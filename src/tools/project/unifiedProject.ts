@@ -10,6 +10,7 @@ import {
 } from "../../models/projectModel.js";
 import { Project, ProjectStatus, TrackerType, ProjectPriority, ProjectCategory, Task, ProjectContext, ProjectInsight, TaskStatus } from "../../types/index.js";
 import { Memory } from "../../types/memory.js";
+import path from "path";
 
 // Define the unified schema
 export const projectSchema = z.object({
@@ -24,6 +25,8 @@ export const projectSchema = z.object({
     "link_jira",
     "list_jira_projects",
     "rename",
+    "add_file",
+    "remove_file",
     "help"
   ]).describe("Action to perform"),
   
@@ -50,6 +53,9 @@ export const projectSchema = z.object({
   
   // For most actions
   projectId: z.string().optional().describe("Project ID"),
+  
+  // File management
+  filePath: z.string().optional().describe("File path to add or remove from project (will be converted to absolute path)"),
   
   // For update action
   updates: z.object({
@@ -105,6 +111,8 @@ export const projectToolActionsOverview = `
 | update           | projectId, updates                | Update project fields                            | project update --projectId <id> --updates ...  |
 | delete           | projectId                         | Delete a project                                 | project delete --projectId <id>                |
 | rename           | projectId, newName                | Rename a project (folder & metadata)             | project rename --projectId <id> --newName ...  |
+| add_file         | projectId, filePath               | Add a file to project context (absolute path)    | project add_file --projectId <id> --filePath ...  |
+| remove_file      | projectId, filePath               | Remove a file from project context               | project remove_file --projectId <id> --filePath ... |
 | generate_prompt  | projectId                         | Generate starter prompt for a project            | project generate_prompt --projectId <id>       |
 | link_jira        | projectId, jiraProjectKey         | Link project to a JIRA epic                      | project link_jira --projectId <id> ...         |
 | list_jira_projects|                                   | List all JIRA projects                           | project list_jira_projects                     |
@@ -269,6 +277,10 @@ export async function project(params: z.infer<typeof projectSchema>) {
             import("../../models/projectModel.js").then(m => m.getProjectTasks(project.id)),
           ]);
 
+          // Read project files
+          const { readProjectFiles } = await import("../../models/projectModel.js");
+          const { fileContents, missingFiles, errors } = await readProjectFiles(project.id);
+
           // --- Project Memory Context Injection (moved up to fix build error) ---
           const { queryMemories } = await import("../../models/memoryModel.js");
           const projectTags = (project.tags || []).map(t => t.toLowerCase());
@@ -294,6 +306,7 @@ export async function project(params: z.infer<typeof projectSchema>) {
           );
           await logDebug(`Project ${project.id}: ${projectMemories.length} project-specific memories, ${tagMatchedMemories.length} tag-matched memories`);
 
+          // Start building the main markdown content
           let markdown = `# Project: ${project.name}\n\n`;
           markdown += `## Description\n${project.description}\n\n`;
           if (project.goals && project.goals.length > 0) {
@@ -303,6 +316,8 @@ export async function project(params: z.infer<typeof projectSchema>) {
             });
             markdown += `\n`;
           }
+          
+          // Key Insights, Important Context, Referenced Files, Current Tasks (Order remains same)
           if (insights && insights.length > 0) {
             markdown += `## Key Insights\n`;
             insights.slice(0, 5).forEach(insight => {
@@ -324,7 +339,6 @@ export async function project(params: z.infer<typeof projectSchema>) {
             });
             markdown += `\n`;
           }
-          // Referenced Files
           const fileRefs = contexts.filter(c => c.tags?.includes("file-reference"));
           if (fileRefs.length > 0) {
             markdown += `## Referenced Files\n`;
@@ -346,6 +360,8 @@ export async function project(params: z.infer<typeof projectSchema>) {
             });
             markdown += `\n`;
           }
+          
+          // Project Metadata
           markdown += `## Project Metadata\n`;
           markdown += `- **Status**: ${project.status}\n`;
           if (project.priority) {
@@ -357,9 +373,12 @@ export async function project(params: z.infer<typeof projectSchema>) {
           markdown += `- **Created**: ${project.createdAt.toISOString()}\n`;
           markdown += `- **Last Updated**: ${project.updatedAt.toISOString()}\n`;
           markdown += `- **Total Contexts**: ${contexts.length}\n`;
-          markdown += `- **Total Memories**: ${allMemories.length}\n`;
+          markdown += `- **Total Memories**: ${projectMemories.length + tagMatchedMemories.length} (Project-relevant)\n`;
           markdown += `- **Total Insights**: ${insights.length}\n`;
           markdown += `- **Total Tasks**: ${tasks.length}\n`;
+          if (project.files && project.files.length > 0) {
+            markdown += `- **Project Files**: ${project.files.length} files (${fileContents.length} readable)\n`;
+          }
           if (project.tags && project.tags.length > 0) {
             markdown += `- **Tags**: ${project.tags.join(", ")}\n`;
           }
@@ -375,32 +394,31 @@ export async function project(params: z.infer<typeof projectSchema>) {
               markdown += `- **URL**: ${project.externalTracker.url}\n`;
             }
           }
-          // --- Appendix: Referenced File Contents ---
+          
+          // Appendix for Referenced Markdown File Contents (from context tags)
           const fs = await import("fs/promises");
-          let appendix = "";
+          let contextAppendix = "";
           for (const ref of fileRefs) {
             const lines = ref.content.split('\n');
             const filePath = lines[0].trim();
             if (filePath.endsWith('.md')) {
               try {
-                // Only try to read if file exists
                 await fs.access(filePath);
                 const fileContent = await fs.readFile(filePath, "utf-8");
-                appendix += `\n---\n### Appendix: ${filePath}\n`;
-                if (lines[1]) appendix += `*${lines[1].trim()}*\n`;
-                appendix += `\n\n` + fileContent + `\n`;
+                contextAppendix += `\n---\n### Appendix: ${filePath}\n`;
+                if (lines[1]) contextAppendix += `*${lines[1].trim()}*\n`;
+                contextAppendix += `\n\n` + fileContent + `\n`;
               } catch {
                 // Skip files that cannot be accessed or read
               }
             }
           }
-          if (appendix) {
-            markdown += `\n## Appendix: Referenced File Contents\n` + appendix;
+          if (contextAppendix) {
+            markdown += `\n## Appendix: Referenced Context Files\n` + contextAppendix;
           }
+
           // --- Project Memory Context Injection ---
-          // Section output
           markdown += `\n## 📚 Project Memories\n`;
-          // --- Confirmation prompt with memory summary ---
           let memorySummary = "";
           if (memoryError) {
             memorySummary = `Error loading memories: ${memoryError}\n`;
@@ -408,18 +426,52 @@ export async function project(params: z.infer<typeof projectSchema>) {
             memorySummary = `No relevant memories found for this project.\n`;
           } else {
             memorySummary = `Relevant Memories:\n`;
-            for (const mem of projectMemories) {
+            projectMemories.forEach(mem => {
               memorySummary += `- ${mem.summary} [${mem.type}] (${new Date(mem.created).toLocaleDateString()}) | Tags: ${mem.tags.join(", ")}\n`;
+            });
+            tagMatchedMemories.forEach(mem => {
+              memorySummary += `- ${mem.summary} [${mem.type}] (${new Date(mem.created).toLocaleDateString()}) | Tags: ${mem.tags.join(", ")}\n`;
+            });
+          }
+          markdown += memorySummary;
+          
+          // --- Appendix for Included Project Files (from project.files array) ---
+          let projectFilesAppendix = "";
+          if (fileContents.length > 0 || missingFiles.length > 0 || errors.length > 0) {
+            projectFilesAppendix += "\n---\n## Appendix: Included Project Files\n";
+          }
+
+          if (fileContents.length > 0) {
+            projectFilesAppendix += `\n### Successfully Loaded Files (${fileContents.length}):\n`;
+            fileContents.forEach(file => {
+              projectFilesAppendix += `\n#### ${file.path}\n`;
+              projectFilesAppendix += `\`\`\`\n${file.content}\n\`\`\`\n`;
+            });
+          }
+          
+          if (missingFiles.length > 0 || errors.length > 0) {
+            projectFilesAppendix += `\n### ⚠️ File Issues\n`;
+            if (missingFiles.length > 0) {
+              projectFilesAppendix += `\n**Missing Files (${missingFiles.length}):**\n`;
+              missingFiles.forEach(file => {
+                projectFilesAppendix += `- ❌ ${file}\n`;
+              });
             }
-            for (const mem of tagMatchedMemories) {
-              memorySummary += `- ${mem.summary} [${mem.type}] (${new Date(mem.created).toLocaleDateString()}) | Tags: ${mem.tags.join(", ")}\n`;
+            if (errors.length > 0) {
+              projectFilesAppendix += `\n**File Read Errors (${errors.length}):**\n`;
+              errors.forEach(error => {
+                projectFilesAppendix += `- ⚠️ ${error.path}: ${error.error}\n`;
+              });
             }
           }
-          // Respond with both the markdown and the memory summary in the main confirmation
-          return { content: [
-            { type: "text", text: markdown },
-            { type: "text", text: `\n---\n\n${memorySummary}` }
-          ] };
+          
+          // Append the project files appendix at the very end
+          if (projectFilesAppendix) {
+            markdown += projectFilesAppendix;
+          }
+
+          // Respond with the combined markdown
+          return { content: [{ type: "text", text: markdown }] };
         } else {
           return { content: [{ type: "text", text: `✅ Project '${project.name}' is now active.` }] };
         }
@@ -546,6 +598,66 @@ export async function project(params: z.infer<typeof projectSchema>) {
         }
       }
         
+      case "add_file": {
+        if (!params.projectId || !params.filePath) {
+          return { content: [{ type: "text", text: "❌ projectId and filePath are required for adding a file." }] };
+        }
+        
+        try {
+          const { addProjectFile, normalizeProjectFilePaths } = await import("../../models/projectModel.js");
+          
+          // Normalize paths to absolute before adding
+          await normalizeProjectFilePaths(params.projectId);
+          
+          const added = await addProjectFile(params.projectId, params.filePath);
+          
+          if (added) {
+            // Get the absolute path that was actually added
+            const absolutePath = path.isAbsolute(params.filePath) 
+              ? params.filePath 
+              : path.resolve(params.filePath);
+            
+            let response = `✅ File added to project!\n\n`;
+            response += `📁 File: ${absolutePath}\n`;
+            response += `📋 Project: ${params.projectId}\n\n`;
+            response += `The file content will now be included when opening the project.`;
+            
+            return { content: [{ type: "text", text: response }] };
+          } else {
+            return { content: [{ type: "text", text: `⚠️ File is already in the project: ${params.filePath}` }] };
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { content: [{ type: "text", text: `❌ Failed to add file: ${errorMessage}` }] };
+        }
+      }
+        
+      case "remove_file": {
+        if (!params.projectId || !params.filePath) {
+          return { content: [{ type: "text", text: "❌ projectId and filePath are required for removing a file." }] };
+        }
+        
+        try {
+          const { removeProjectFile } = await import("../../models/projectModel.js");
+          
+          const removed = await removeProjectFile(params.projectId, params.filePath);
+          
+          if (removed) {
+            let response = `✅ File removed from project!\n\n`;
+            response += `📁 File: ${params.filePath}\n`;
+            response += `📋 Project: ${params.projectId}\n\n`;
+            response += `The file will no longer be included when opening the project.`;
+            
+            return { content: [{ type: "text", text: response }] };
+          } else {
+            return { content: [{ type: "text", text: `⚠️ File not found in project: ${params.filePath}` }] };
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { content: [{ type: "text", text: `❌ Failed to remove file: ${errorMessage}` }] };
+        }
+      }
+        
       case "help": {
         return { content: [{ type: "text", text: projectToolActionsOverview }] };
       }
@@ -584,5 +696,7 @@ async function logDebug(msg: string) {
   try {
     const fsLog = await import("fs/promises");
     await fsLog.appendFile(logPath, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {/* intentionally empty */}
+  } catch {
+    // Ignore logging errors
+  }
 }
