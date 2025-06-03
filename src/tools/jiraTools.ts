@@ -5,6 +5,78 @@ import fs from "fs/promises";
 import fsSync from 'fs';
 import path from "path";
 
+// Basic JIRA Interfaces for improved type safety
+interface JiraUser {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
+  avatarUrls?: {
+    '48x48'?: string;
+  };
+}
+
+// Simplified ADF Node interface for text extraction
+interface AdfNode {
+  type: string;
+  text?: string;
+  content?: AdfNode[];
+  // attrs?: any; // Could be further specified if needed
+  // marks?: any[]; // Could be further specified if needed
+}
+
+interface JiraComment {
+  author?: JiraUser;
+  body?: AdfNode | string; // ADF or string
+  created: string;
+}
+
+interface JiraAttachment {
+  filename: string;
+  content: string; // URL to the attachment
+  size: number;
+}
+
+// More specific type for JIRA Issue Link Type
+interface JiraIssueLinkType {
+  name?: string;
+  outwardDesc?: string;
+  inwardDesc?: string;
+  // Allow other string-indexed properties for dynamic access like [direction + "Desc"]
+  [key: string]: string | undefined;
+}
+
+// More specific type for JIRA Issue Links
+interface JiraIssueLink {
+  type?: JiraIssueLinkType;
+  outwardIssue?: { key: string; fields?: { summary?: string } };
+  inwardIssue?: { key: string; fields?: { summary?: string } };
+}
+
+interface BasicJiraTicketFields {
+  summary?: string;
+  status?: { name?: string };
+  issuetype?: { name?: string };
+  project?: { key?: string; name?: string };
+  priority?: { name?: string };
+  reporter?: JiraUser;
+  assignee?: JiraUser;
+  created?: string;
+  updated?: string;
+  labels?: string[];
+  description?: AdfNode | string; // ADF or string
+  subtasks?: Array<{ key: string; fields?: { summary?: string; status?: { name?: string } } }>;
+  issuelinks?: JiraIssueLink[]; // Use the more specific type
+  comment?: { comments?: JiraComment[] };
+  attachment?: JiraAttachment[];
+}
+
+interface BasicJiraTicket {
+  key: string;
+  fields: BasicJiraTicketFields;
+  id?: string;
+  self?: string;
+}
+
 const jiraToolLogPath = '/tmp/mcp_shrimp_jira_tool.log';
 
 function appendJiraToolLog(message: string) {
@@ -19,8 +91,8 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials"]),
-  domain: z.enum(["ticket", "project", "component", "migration"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user"]),
+  domain: z.enum(["ticket", "project", "component", "migration", "user"]),
   context: z.object({
     projectKey: z.string().optional(),
     summary: z.string().optional(),
@@ -29,6 +101,9 @@ export const JiraToolSchema = z.object({
     metadata: z.record(z.string(), z.any()).optional(),
     issueType: z.string().optional(), // Add support for issue type
     issueKey: z.string().optional(), // Added for finding specific ticket
+    assigneeAccountId: z.string().optional(), // For assigning tickets
+    assignee: z.string().optional(), // For providing username/email for assignment lookup
+    userQuery: z.string().optional(), // Explicit field for user search query
     // Add more fields as needed for extensibility
   }).passthrough(), // Allow other fields for specific actions if needed
   options: z.object({
@@ -388,11 +463,48 @@ export async function updateJiraIssueLabels(issueKey: string, newLabels: string[
   appendJiraToolLog(`[INFO] updateJiraIssueLabels: Successfully updated labels for ${issueKey}. Labels: ${allLabels.join(', ')}`);
 }
 
+// Helper to find a JIRA user by query (username, displayName, or email)
+async function findJiraUser(query: string): Promise<JiraUser | null> {
+  appendJiraToolLog(`[INFO] findJiraUser: Attempting to find user with query: ${query}`);
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const encodedQuery = encodeURIComponent(query);
+  const url = `${baseUrl}/rest/api/3/user/search?query=${encodedQuery}`;
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+
+  appendJiraToolLog(`[INFO] findJiraUser: Fetching URL: ${url}`);
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    appendJiraToolLog(`[ERROR] findJiraUser: JIRA API error searching for user '${query}': ${res.status} ${errorText}`);
+    return null; 
+  }
+  
+  const users = await res.json() as JiraUser[]; 
+  if (users && users.length > 0) {
+    if (users.length === 1) {
+      appendJiraToolLog(`[INFO] findJiraUser: Found 1 user for query '${query}': ${users[0].accountId} - ${users[0].displayName}`);
+      return users[0]; 
+    } else {
+      appendJiraToolLog(`[WARN] findJiraUser: Found ${users.length} users for query '${query}'. Returning the first one. Consider more specific query or handling multiple results.`);
+      return users[0]; 
+    }
+  } else {
+    appendJiraToolLog(`[INFO] findJiraUser: No user found for query '${query}'.`);
+    return null;
+  }
+}
+
 // Helper to fetch a single JIRA ticket by its key with all fields
-async function getJiraTicketByKey(issueKey: string): Promise<unknown> {
+async function getJiraTicketByKey(issueKey: string): Promise<BasicJiraTicket> {
   appendJiraToolLog(`[INFO] getJiraTicketByKey: Attempting to fetch details for issue: ${issueKey}`);
   const { baseUrl, email, apiToken } = getJiraEnv();
-  // Requesting all fields. Alternatively, specify a list of fields: &fields=summary,description,status,assignee,reporter,priority,labels,comment,issuelinks,subtasks,epic,created,updated,attachment
   const url = `${baseUrl}/rest/api/3/issue/${issueKey}?fields=*all`; 
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
@@ -411,19 +523,19 @@ async function getJiraTicketByKey(issueKey: string): Promise<unknown> {
     throw new Error(`JIRA API error fetching ${issueKey}: ${res.status} ${errorText}`);
   }
   
-  const ticketData = await res.json();
+  const ticketData = await res.json() as BasicJiraTicket;
   appendJiraToolLog(`[INFO] getJiraTicketByKey: Successfully fetched details for ${issueKey}. Data size: ${JSON.stringify(ticketData).length}`);
   return ticketData;
 }
 
 // Helper to format JIRA ticket JSON to Markdown
-function formatJiraTicketToMarkdown(ticketData: any): string {
+function formatJiraTicketToMarkdown(ticketData: BasicJiraTicket): string {
   if (!ticketData || !ticketData.key || !ticketData.fields) {
     return "# Invalid JIRA Ticket Data\n\nCould not format ticket details due to missing key information.";
   }
 
   const fields = ticketData.fields;
-  const baseUrl = getJiraEnv().baseUrl; // Assuming getJiraEnv is available in this scope
+  const baseUrl = getJiraEnv().baseUrl; 
   const ticketUrl = `${baseUrl}/browse/${ticketData.key}`;
 
   let md = `# JIRA Ticket: [${ticketData.key}](${ticketUrl})\n\n`;
@@ -442,24 +554,20 @@ function formatJiraTicketToMarkdown(ticketData: any): string {
     md += `**Labels:** ${fields.labels.join(", ")}\n`;
   }
 
-  // Description (basic handling, ADF is complex)
   md += "\n## Description\n";
   if (fields.description) {
-    // JIRA description is often in Atlassian Document Format (ADF)
-    // For a simple markdown display, we might extract text content.
-    // This is a placeholder for more sophisticated ADF to Markdown conversion if needed.
     if (typeof fields.description === 'string') {
       md += `${fields.description}\n`;
     } else if (fields.description.type === 'doc' && fields.description.content) {
       let descText = "";
-      function extractTextFromAdf(node: any) {
+      function extractTextFromAdf(node: AdfNode) {
         if (node.type === 'text') {
           descText += node.text;
         }
         if (node.content) {
           node.content.forEach(extractTextFromAdf);
         }
-        if (node.type === 'paragraph') { // Add newlines for paragraphs
+        if (node.type === 'paragraph') { 
           descText += '\n';
         }
       }
@@ -472,71 +580,92 @@ function formatJiraTicketToMarkdown(ticketData: any): string {
     md += "No description provided.\n";
   }
 
-  // Sub-tasks
   if (fields.subtasks && fields.subtasks.length > 0) {
     md += "\n## Sub-tasks\n";
-    fields.subtasks.forEach((subtask: any) => {
+    fields.subtasks.forEach((subtask) => {
       md += `- [${subtask.key}](${baseUrl}/browse/${subtask.key}): ${subtask.fields?.summary || 'N/A'} (${subtask.fields?.status?.name || 'N/A'})\n`;
     });
   }
 
-  // Issue Links (e.g., Epic, Parent)
   if (fields.issuelinks && fields.issuelinks.length > 0) {
     md += "\n## Linked Issues\n";
-    const epicLinkType = fields.issuelinks.find((link: any) => link.type?.name === "Epic-Story Link" && link.inwardIssue);
-    if (epicLinkType) {
+    const epicLinkType = fields.issuelinks.find((link) => link.type?.name === "Epic-Story Link" && link.inwardIssue);
+    if (epicLinkType && epicLinkType.inwardIssue) {
       const epic = epicLinkType.inwardIssue;
       md += `**Epic:** [${epic.key}](${baseUrl}/browse/${epic.key}) - ${epic.fields?.summary || 'N/A'}\n`;
     }
-    // Generic links (blocks, relates to, etc.)
-    fields.issuelinks.forEach((link: any) => {
+    fields.issuelinks.forEach((link: JiraIssueLink) => {
       if (link.type?.name !== "Epic-Story Link") {
         const direction = link.outwardIssue ? "outward" : "inward";
         const issue = link.outwardIssue || link.inwardIssue;
-        if (issue) {
-          md += `- ${link.type?.[direction + "Desc"] || link.type?.name}: [${issue.key}](${baseUrl}/browse/${issue.key}) - ${issue.fields?.summary || 'N/A'}\n`;
+        if (issue && link.type) {
+          const descKey = direction + "Desc";
+          md += `- ${link.type[descKey] || link.type.name}: [${issue.key}](${baseUrl}/browse/${issue.key}) - ${issue.fields?.summary || 'N/A'}\n`;
         }
       }
     });
   }
   
-  // Comments (last 3)
   if (fields.comment && fields.comment.comments && fields.comment.comments.length > 0) {
     md += "\n## Comments\n";
     const comments = fields.comment.comments;
-    const recentComments = comments.slice(-3); // Get last 3 comments
-    recentComments.forEach((comment: any) => {
-      md += `
-**${comment.author?.displayName || "User"}** (${new Date(comment.created).toLocaleString()}):
-`;
-      // Basic ADF text extraction for comments too
+    const recentComments = comments.slice(-3); 
+    recentComments.forEach((comment: JiraComment) => {
+      md += `\n**${comment.author?.displayName || "User"}** (${new Date(comment.created).toLocaleString()}):\n`;
       if (typeof comment.body === 'string') {
-        md += `> ${comment.body.replace(/\\n/g, '\\n>')}\n`; // Basic blockquote
+        md += `> ${comment.body.replace(/\n/g, '\n>')}\n`; 
       } else if (comment.body?.type === 'doc' && comment.body?.content) {
         let commentText = "";
-        function extractTextFromAdfComment(node: any) {
+        function extractTextFromAdfComment(node: AdfNode) {
           if (node.type === 'text') commentText += node.text;
           if (node.content) node.content.forEach(extractTextFromAdfComment);
           if (node.type === 'paragraph') commentText += '\n';
         }
         comment.body.content.forEach(extractTextFromAdfComment);
-        md += `> ${commentText.trim().replace(/\\n/g, '\\n>')}\n`;
+        md += `> ${commentText.trim().replace(/\n/g, '\n>')}\n`;
       } else {
         md += "> Comment not in a recognizable format.\n";
       }
     });
   }
 
-  // Attachments
   if (fields.attachment && fields.attachment.length > 0) {
     md += "\n## Attachments\n";
-    fields.attachment.forEach((att: any) => {
+    fields.attachment.forEach((att: JiraAttachment) => {
       md += `- [${att.filename}](${att.content}) (${(att.size / 1024).toFixed(2)} KB)\n`;
     });
   }
 
   md += `\n---\n[View full ticket in JIRA](${ticketUrl})\n`;
   return md;
+}
+
+// Helper to update a JIRA ticket via API
+async function updateJiraTicket(issueKey: string, updatePayload: Record<string, unknown>): Promise<boolean> {
+  appendJiraToolLog(`[INFO] updateJiraTicket: Attempting to update issue: ${issueKey} with payload: ${JSON.stringify(updatePayload)}`);
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const url = `${baseUrl}/rest/api/3/issue/${issueKey}`;
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updatePayload),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    appendJiraToolLog(`[ERROR] updateJiraTicket: JIRA API error updating ${issueKey}: ${res.status} ${errorText}`);
+    throw new Error(`JIRA API error updating ${issueKey}: ${res.status} - ${errorText}`);
+  }
+  
+  // Typically, a successful PUT for update returns 204 No Content
+  appendJiraToolLog(`[INFO] updateJiraTicket: Successfully updated issue ${issueKey}. Status: ${res.status}`);
+  return true; 
 }
 
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
@@ -634,7 +763,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         }
         appendJiraToolLog(`[INFO] jiraToolHandler (read): Fetching details for issueKey: ${issueKeyToFetch}`);
         try {
-          const ticketData = await getJiraTicketByKey(issueKeyToFetch) as any; 
+          const ticketData = await getJiraTicketByKey(issueKeyToFetch) as BasicJiraTicket; 
           const ticketUrl = `${getJiraEnv().baseUrl}/browse/${ticketData.key}`;
           const markdownSummary = formatJiraTicketToMarkdown(ticketData);
           
@@ -691,14 +820,171 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         json: verificationResult,
       };
     }
-    // Add more cases for update, list, sync, etc.
+    case "update":
+      if (input.domain === "ticket") {
+        const { issueKey, assigneeAccountId, assignee, summary, description, labels, issueType /* add other fields as needed */ } = input.context;
+
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (update/ticket): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for the update ticket action.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        const fieldsToUpdate: Record<string, unknown> = {};
+        let foundAssigneeAccountId = assigneeAccountId;
+
+        // If assigneeAccountId is not directly provided, try to find user by assignee (username/email)
+        if (!foundAssigneeAccountId && assignee && typeof assignee === 'string') {
+          appendJiraToolLog(`[INFO] jiraToolHandler (update/ticket): Assignee Account ID not provided, searching for user '${assignee}'`);
+          try {
+            const jiraUser = await findJiraUser(assignee);
+            if (jiraUser && jiraUser.accountId) {
+              foundAssigneeAccountId = jiraUser.accountId;
+              appendJiraToolLog(`[INFO] jiraToolHandler (update/ticket): Found user '${assignee}' with accountId: ${foundAssigneeAccountId}`);
+            } else {
+              appendJiraToolLog(`[WARN] jiraToolHandler (update/ticket): User '${assignee}' not found or accountId missing.`);
+              // Return a specific warning if user lookup failed but other updates might proceed, 
+              // or an error if assignment was the primary goal.
+              // For now, we'll let it proceed if other fields are to be updated, but an error could be returned here.
+              // To make it an error: 
+              // return {
+              //   markdown: `⚠️ User '${assignee}' not found or could not be resolved for assignment.`,
+              //   json: { error: `User '${assignee}' not found.`, issueKey },
+              // };
+            }
+          } catch (userSearchError) {
+            const errorMsg = userSearchError instanceof Error ? userSearchError.message : String(userSearchError);
+            appendJiraToolLog(`[ERROR] jiraToolHandler (update/ticket): Error searching for user '${assignee}': ${errorMsg}`);
+            // Decide if this is a fatal error for the update operation
+            // return {
+            //  markdown: `❌ Error searching for assignee '${assignee}': ${errorMsg}`,
+            //  json: { error: `Error searching for assignee '${assignee}': ${errorMsg}`, issueKey },
+            // };
+          }
+        }
+
+        if (foundAssigneeAccountId) {
+          fieldsToUpdate.assignee = { accountId: foundAssigneeAccountId };
+        }
+        
+        // Add other fields to update
+        if (summary) {
+          fieldsToUpdate.summary = summary;
+        }
+        if (description) {
+          fieldsToUpdate.description = toADF(description, input.context.metadata);
+        }
+        if (labels && Array.isArray(labels)) {
+          fieldsToUpdate.labels = labels;
+        }
+        if (issueType) { 
+          fieldsToUpdate.issuetype = { name: issueType }; 
+        }
+        
+        if (Object.keys(fieldsToUpdate).length === 0) {
+          let message = "⚠️ No valid update fields provided or assignee lookup failed.";
+          if (assignee && !foundAssigneeAccountId && Object.keys(fieldsToUpdate).length === 0){
+            message = `⚠️ User '${assignee}' could not be found for assignment, and no other update fields were provided.`
+          }
+          appendJiraToolLog(`[INFO] jiraToolHandler (update/ticket): ${message} For issueKey: ${issueKey}.`);
+          return {
+            markdown: message,
+            json: { warning: message, issueKey },
+          };
+        }
+
+        const updatePayload = { fields: fieldsToUpdate };
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (update/ticket): Updating issue ${issueKey} with payload: ${JSON.stringify(updatePayload)}`);
+        try {
+          await updateJiraTicket(issueKey, updatePayload);
+          const updatedTicketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
+          const ticketUrl = `${getJiraEnv().baseUrl}/browse/${updatedTicketData.key}`;
+          const markdownSummary = formatJiraTicketToMarkdown(updatedTicketData);
+
+          return {
+            markdown: `# ✅ JIRA Ticket ${issueKey} Updated\n\n${markdownSummary}`,
+            json: updatedTicketData,
+            url: ticketUrl,
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (update/ticket): Failed to update ${issueKey}: ${errorMsg}`);
+          return {
+            markdown: `❌ Error updating JIRA ticket ${issueKey}: ${errorMsg}`,
+            json: { error: errorMsg, issueKey },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (update): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: update action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for update action" }
+        };
+      }
+    case "find_user": {
+      if (input.domain !== "user") {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (find_user): Invalid domain '${input.domain}'. Must be 'user'.`);
+        return {
+          markdown: `❌ Error: find_user action is only valid for the 'user' domain.`,
+          json: { error: "Invalid domain for find_user action" },
+        };
+      }
+      const userQuery = input.context.userQuery || input.context.summary; // Allow using summary as a fallback for query
+      if (!userQuery) {
+        appendJiraToolLog("[ERROR] jiraToolHandler (find_user): userQuery (or summary) is required.");
+        return {
+          markdown: "❌ Error: userQuery (or context.summary) is required for find_user action.",
+          json: { error: "userQuery is required" },
+        };
+      }
+      appendJiraToolLog(`[INFO] jiraToolHandler (find_user): Searching for user with query: ${userQuery}`);
+      try {
+        const userResult = await findJiraUser(userQuery);
+        if (userResult) {
+          const jiraUser = userResult as JiraUser; 
+          let md = `# User Found\n\n`;
+          md += `**Display Name:** ${jiraUser.displayName || "N/A"}\n`;
+          md += `**Account ID:** ${jiraUser.accountId || "N/A"}\n`;
+          md += `**Email:** ${jiraUser.emailAddress || "N/A"}\n`;
+          if (jiraUser.avatarUrls) {
+            md += `**Avatar (48x48):** ![Avatar](${jiraUser.avatarUrls['48x48'] || ''})\n`;
+          }
+
+          return {
+            markdown: md,
+            json: jiraUser, 
+          };
+        } else {
+          appendJiraToolLog(`[INFO] jiraToolHandler (find_user): No user found for query: ${userQuery}`);
+          return {
+            markdown: `ℹ️ No JIRA user found matching query: "${userQuery}" `,
+            json: { message: "No user found", query: userQuery },
+          };
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        appendJiraToolLog(`[ERROR] jiraToolHandler (find_user): Error searching for user '${userQuery}': ${errorMsg}`);
+        return {
+          markdown: `❌ Error searching for JIRA user '${userQuery}': ${errorMsg}`,
+          json: { error: errorMsg, query: userQuery },
+        };
+      }
+    }
     default:
       appendJiraToolLog(`[ERROR] jiraToolHandler: Unsupported action/domain: Action=${input.action}, Domain=${input.domain}`);
-      throw new Error("Unsupported action/domain combination or not implemented yet.");
+      return {
+        markdown: `❌ Error: The action '${input.action}' for domain '${input.domain}' is not supported or not implemented yet.`,
+        json: { error: "Unsupported action/domain combination", action: input.action, domain: input.domain },
+      };
   }
-  // Fallback error if a case doesn't return or throw (should ideally not be reached with comprehensive cases)
   appendJiraToolLog(`[ERROR] jiraToolHandler: Reached end of switch without valid action for Action=${input.action}, Domain=${input.domain}`);
-  throw new Error("Not implemented yet or invalid action/domain for this path."); 
+  return {
+    markdown: `❌ Error: Invalid path or unhandled scenario for action '${input.action}', domain '${input.domain}'.`,
+    json: { error: "Invalid path or unhandled scenario", action: input.action, domain: input.domain },
+  }; 
 }
 
 // Integration points:
