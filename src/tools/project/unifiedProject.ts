@@ -12,6 +12,13 @@ import { Project, ProjectStatus, TrackerType, ProjectPriority, ProjectCategory, 
 import { Memory } from "../../types/memory.js";
 import path from "path";
 
+// Type declaration for agent orchestration variable
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare global {
+  // eslint-disable-next-line no-var
+  var __projectCreateExpertResponse: string | undefined;
+}
+
 // Define the unified schema
 export const projectSchema = z.object({
   action: z.enum([
@@ -133,7 +140,53 @@ export async function project(params: z.infer<typeof projectSchema>) {
         if (!params.name || name.toLowerCase().startsWith('untitled')) {
           return { content: [{ type: "text", text: `⚠️ Please provide a semantically meaningful project name (e.g., 'translation_project', 'market_data_lake', 'ui_kit_deprecation'). This will be used for the project folder and makes it easier to search and manage projects.` }] };
         }
-        
+
+        // --- Duplicate detection logic start ---
+        const allProjects = await getAllProjects();
+        const newProjectNameLower = name.toLowerCase();
+        const similarProjects = allProjects.filter(p => {
+          const existingNameLower = p.name.toLowerCase();
+          return existingNameLower.includes(newProjectNameLower) || newProjectNameLower.includes(existingNameLower);
+        });
+        if (similarProjects.length > 0) {
+          let problemDescription = `Attempting to create project "${name}" (Description: ${description}). Potential duplicates found. Please advise:\n1. Proceed with creating "${name}".\n2. Open existing project (provide ID from list below).\n3. Cancel creation.\n\nPotential duplicates:\n`;
+          similarProjects.forEach(p => {
+            problemDescription += `- ${p.name} (ID: ${p.id}) Description: ${p.description || 'N/A'}\n`;
+          });
+          // Call consult_expert tool (agent will handle this call)
+          // The following is a conceptual placeholder for agent orchestration:
+          // const expertResponse = await consult_expert({ problem_description: problemDescription, relevant_context: `New project name: "${name}", New project description: "${description}"`, task_goal: "Decide whether to create a new project or open an existing one." });
+          // let responseText = expertResponse.text.toLowerCase();
+          // For this code, assume responseText is provided by the agent:
+          if (typeof globalThis.__projectCreateExpertResponse === 'string') {
+            const responseText = globalThis.__projectCreateExpertResponse.toLowerCase();
+            if (responseText.includes("proceed") || responseText.includes("option 1")) {
+              // Continue to creation below
+            } else if (responseText.includes("open")) {
+              const match = responseText.match(/([a-f0-9-]+)/i);
+              const projectIdToOpen = match ? match[1] : null;
+              if (projectIdToOpen) {
+                const projectToOpen = allProjects.find(p => p.id.toLowerCase() === projectIdToOpen.toLowerCase());
+                if (projectToOpen) {
+                  await setActiveProject(projectToOpen.id, projectToOpen.name);
+                  return { content: [{ type: "text", text: `✅ Project '${projectToOpen.name}' (ID: ${projectToOpen.id}) is now active. Creation of new project "${name}" was skipped.` }] };
+                } else {
+                  return { content: [{ type: "text", text: `⚠️ Could not find project with ID "${projectIdToOpen}" among potential duplicates. Project "${name}" was not created.` }] };
+                }
+              } else {
+                return { content: [{ type: "text", text: `⚠️ No valid project ID specified for opening. Project "${name}" was not created.` }] };
+              }
+            } else {
+              // Cancel or ambiguous
+              return { content: [{ type: "text", text: `Project creation for "${name}" cancelled by user or due to ambiguous response regarding potential duplicates.` }] };
+            }
+          } else {
+            // If not running in agent orchestration, return prompt for agent to handle consult_expert
+            return { content: [{ type: "text", text: problemDescription }] };
+          }
+        }
+        // --- Duplicate detection logic end ---
+
         // Create project without external tracker initially
         const metadata = (params.owner || params.team || params.deadline || params.repository) ? {
           owner: params.owner,
@@ -141,7 +194,6 @@ export async function project(params: z.infer<typeof projectSchema>) {
           deadline: params.deadline ? new Date(params.deadline) : undefined,
           repository: params.repository,
         } : undefined;
-        
         const project = await createProject(
           name,
           description,
@@ -152,7 +204,6 @@ export async function project(params: z.infer<typeof projectSchema>) {
           undefined, // No external tracker yet
           metadata
         );
-        
         let response = `✅ Project created: **${project.name}** (ID: ${project.id})\n`;
         if (project.priority) {
           response += `\n🎯 Priority: ${project.priority}`;
@@ -160,7 +211,6 @@ export async function project(params: z.infer<typeof projectSchema>) {
         if (project.metadata?.owner) {
           response += `\n👤 Owner: ${project.metadata.owner}`;
         }
-        
         // Always prompt for JIRA epic linking
         response += `\n\nWould you like to link this project to a JIRA epic? Linking enables advanced features such as:\n`;
         response += `- Continuous mode (work through tickets automatically)\n`;
@@ -169,7 +219,6 @@ export async function project(params: z.infer<typeof projectSchema>) {
         response += `\nTo link to an existing JIRA epic, run:\n`;
         response += `project link_jira --projectId "${project.id}" --jiraProjectKey <EPIC_KEY>\n\n`;
         response += `Example: project link_jira --projectId "${project.id}" --jiraProjectKey "TT-206"`;
-        
         return { content: [{ type: "text", text: response }] };
       }
         
