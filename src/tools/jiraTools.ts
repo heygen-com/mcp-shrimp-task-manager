@@ -96,7 +96,7 @@ interface JiraChangelogEntry {
   historyMetadata?: Record<string, unknown>; // For additional metadata if present
 }
 
-interface JiraChangelog {
+export interface JiraChangelog {
   startAt: number;
   maxResults: number;
   total: number;
@@ -744,7 +744,7 @@ async function getJiraTicketHistory(issueKey: string, page: number = 1, limit: n
   return changelogData; 
 }
 
-function formatChangelogToTimelineMarkdown(issueKey: string, changelog: JiraChangelog): string {
+export function formatChangelogToTimelineMarkdown(issueKey: string, changelog: JiraChangelog, newEntryIds?: Set<string>): string {
   if (!changelog || !changelog.values || changelog.values.length === 0) {
     return `No history found for JIRA ticket [${issueKey}](${getJiraEnv().baseUrl}/browse/${issueKey}).`;
   }
@@ -756,6 +756,7 @@ function formatChangelogToTimelineMarkdown(issueKey: string, changelog: JiraChan
   for (const entry of sortedEntries) {
     const authorName = entry.author?.displayName || "Unknown User";
     const relativeTime = timeAgo(entry.created);
+    const isNew = newEntryIds?.has(entry.id);
 
     for (const item of entry.items) {
       let from = item.fromString || item.from || "nothing";
@@ -768,7 +769,7 @@ function formatChangelogToTimelineMarkdown(issueKey: string, changelog: JiraChan
         if (to && to.length > 70) to = to.substring(0, 70) + "...";
       }
       
-      md += `- `;
+      md += isNew ? "🆕 " : "- ";
       if (item.field.toLowerCase() === "attachment" && item.fromString === null) {
         md += `Added attachment: **${to}**\n`;
       } else if (item.field.toLowerCase() === "attachment" && item.toString === null) {
@@ -1109,7 +1110,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         appendJiraToolLog(`[INFO] jiraToolHandler (history): Fetching history for issue: ${issueKey}`);
         try {
           const historyData = await getJiraTicketHistory(issueKey, input.options?.page, input.options?.limit);
-          const markdownSummary = formatChangelogToTimelineMarkdown(issueKey, historyData);
+          const markdownSummary = formatChangelogToTimelineMarkdown(issueKey, historyData, new Set());
           
           return {
             markdown: markdownSummary,

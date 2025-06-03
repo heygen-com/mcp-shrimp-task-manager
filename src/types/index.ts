@@ -142,6 +142,15 @@ export enum TrackerType {
   OTHER = "other",
 }
 
+// --- BEGIN NEW JIRA SYNC METADATA ---_/
+// Stores JIRA epic sync state
+export interface JiraSyncMetadata {
+  lastSyncTimestamp: string; // ISO string of the last successful sync
+  lastSyncETag?: string; // Optional: ETag from the last JIRA API response for conditional GETs
+  processedChangelogEntryIds: string[]; // IDs of changelog entries processed in the last sync
+}
+// --- END NEW JIRA SYNC METADATA ---_/
+
 // JIRA issue types
 export enum JiraIssueType {
   EPIC = "epic",
@@ -179,6 +188,7 @@ export interface ExternalTracker {
   url?: string; // Direct URL to the issue
   parentKey?: string; // Parent issue key (for subtasks)
   metadata?: Record<string, unknown>; // Additional tracker-specific data
+  syncMetadata?: JiraSyncMetadata; // <--- ADDED FOR JIRA SYNC STATE
 }
 
 // Project metadata

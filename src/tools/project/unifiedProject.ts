@@ -483,6 +483,82 @@ export async function project(params: z.infer<typeof projectSchema>) {
             });
           }
           markdown += memorySummary;
+
+          // --- JIRA Epic History ---
+          if (project.externalTracker?.type === TrackerType.JIRA && project.externalTracker.issueKey) {
+            const issueKey = project.externalTracker.issueKey;
+            let syncMetadata = project.externalTracker.syncMetadata;
+            if (!syncMetadata) {
+              syncMetadata = { 
+                lastSyncTimestamp: new Date(0).toISOString(), 
+                processedChangelogEntryIds: [] 
+              };
+            }
+            const previouslyProcessedEntryIds = new Set(syncMetadata.processedChangelogEntryIds);
+            let newUpdatesSummary = "";
+
+            markdown += `\n## 📜 JIRA Epic History (${issueKey})\n`;
+            try {
+              const { jiraToolHandler } = await import("../jiraTools.js");
+              // Fetch all pages of history for accurate diffing for now. 
+              // Consider pagination for display if needed, but for diffing, all data is better.
+              const historyResult = await jiraToolHandler({
+                action: "history",
+                domain: "ticket",
+                context: { issueKey },
+                options: { limit: 200 } // Fetch a large number to likely get all for diffing
+              });
+
+              // Assuming historyResult.json conforms to JiraChangelog interface from jiraTools.ts
+              // We might need to import JiraChangelog type here if not already available globally
+              // For now, we'll check structure before casting to avoid runtime errors.
+              const rawJson = historyResult.json as { values?: { id: string, created: string }[] };
+
+              if (rawJson && Array.isArray(rawJson.values)) {
+                const fetchedEntries = rawJson.values as { id: string, created: string }[]; // Now this cast is safer
+                const newEntryIds = new Set<string>();
+                const allCurrentEntryIds: string[] = [];
+                let newUpdatesCount = 0;
+
+                for (const entry of fetchedEntries) {
+                  allCurrentEntryIds.push(entry.id);
+                  if (!previouslyProcessedEntryIds.has(entry.id)) {
+                    newEntryIds.add(entry.id);
+                    newUpdatesCount++;
+                  }
+                }
+
+                if (newUpdatesCount > 0) {
+                  const lastSyncDate = new Date(syncMetadata.lastSyncTimestamp);
+                  const formattedLastSyncDate = lastSyncDate.getTime() === 0 ? "the beginning" : lastSyncDate.toLocaleString();
+                  newUpdatesSummary = `🆕 **${newUpdatesCount} new update(s) since ${formattedLastSyncDate}.**\n\n`;
+                }
+                markdown += newUpdatesSummary;
+
+                // Call the formatter with the set of new entry IDs
+                const { formatChangelogToTimelineMarkdown } = await import("../jiraTools.js"); 
+                // This assumes formatChangelogToTimelineMarkdown is also exported from jiraTools.ts
+                const historyMarkdown = formatChangelogToTimelineMarkdown(issueKey, historyResult.json as import("../jiraTools.js").JiraChangelog, newEntryIds);
+                markdown += historyMarkdown.replace(/^#.*\n\n/, ''); // Remove default header
+                
+                // Update sync metadata
+                project.externalTracker.syncMetadata = {
+                  lastSyncTimestamp: new Date().toISOString(),
+                  processedChangelogEntryIds: allCurrentEntryIds,
+                  // lastSyncETag: historyResult.etag // If JIRA API provides ETags for changelog
+                };
+                // Persist the updated project with new syncMetadata
+                await updateProjectModel(project.id, { externalTracker: project.externalTracker });
+
+              } else {
+                markdown += "Could not retrieve JIRA epic history structured data.\n";
+              }
+            } catch (jiraError) {
+              const errorMessage = jiraError instanceof Error ? jiraError.message : String(jiraError);
+              markdown += `⚠️ Error fetching or processing JIRA epic history: ${errorMessage}\n`;
+              await logDebug(`Error fetching/processing JIRA epic history for ${issueKey}: ${errorMessage}`);
+            }
+          }
           
           // --- Appendix for Included Project Files (from project.files array) ---
           let projectFilesAppendix = "";
