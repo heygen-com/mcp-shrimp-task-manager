@@ -19,7 +19,7 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "find", "list", "sync", "verify_credentials"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials"]),
   domain: z.enum(["ticket", "project", "component", "migration"]),
   context: z.object({
     projectKey: z.string().optional(),
@@ -28,9 +28,14 @@ export const JiraToolSchema = z.object({
     labels: z.array(z.string()).optional(),
     metadata: z.record(z.string(), z.any()).optional(),
     issueType: z.string().optional(), // Add support for issue type
+    issueKey: z.string().optional(), // Added for finding specific ticket
     // Add more fields as needed for extensibility
   }).passthrough(), // Allow other fields for specific actions if needed
-  options: z.object({}).passthrough().optional(), // For future extensibility
+  options: z.object({
+    // fetchExactMatch is no longer needed for a dedicated 'read' action for specific tickets.
+    // It might be repurposed if 'find' evolves to support more complex queries.
+    fetchExactMatch: z.boolean().optional(), // Flag to fetch a single specific ticket
+  }).passthrough().optional(), // For future extensibility
 });
 
 // Typescript type for convenience
@@ -383,6 +388,157 @@ export async function updateJiraIssueLabels(issueKey: string, newLabels: string[
   appendJiraToolLog(`[INFO] updateJiraIssueLabels: Successfully updated labels for ${issueKey}. Labels: ${allLabels.join(', ')}`);
 }
 
+// Helper to fetch a single JIRA ticket by its key with all fields
+async function getJiraTicketByKey(issueKey: string): Promise<unknown> {
+  appendJiraToolLog(`[INFO] getJiraTicketByKey: Attempting to fetch details for issue: ${issueKey}`);
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  // Requesting all fields. Alternatively, specify a list of fields: &fields=summary,description,status,assignee,reporter,priority,labels,comment,issuelinks,subtasks,epic,created,updated,attachment
+  const url = `${baseUrl}/rest/api/3/issue/${issueKey}?fields=*all`; 
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+
+  appendJiraToolLog(`[INFO] getJiraTicketByKey: Fetching URL: ${url}`);
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    appendJiraToolLog(`[ERROR] getJiraTicketByKey: JIRA API error for ${issueKey}: ${res.status} ${errorText}`);
+    throw new Error(`JIRA API error fetching ${issueKey}: ${res.status} ${errorText}`);
+  }
+  
+  const ticketData = await res.json();
+  appendJiraToolLog(`[INFO] getJiraTicketByKey: Successfully fetched details for ${issueKey}. Data size: ${JSON.stringify(ticketData).length}`);
+  return ticketData;
+}
+
+// Helper to format JIRA ticket JSON to Markdown
+function formatJiraTicketToMarkdown(ticketData: any): string {
+  if (!ticketData || !ticketData.key || !ticketData.fields) {
+    return "# Invalid JIRA Ticket Data\n\nCould not format ticket details due to missing key information.";
+  }
+
+  const fields = ticketData.fields;
+  const baseUrl = getJiraEnv().baseUrl; // Assuming getJiraEnv is available in this scope
+  const ticketUrl = `${baseUrl}/browse/${ticketData.key}`;
+
+  let md = `# JIRA Ticket: [${ticketData.key}](${ticketUrl})\n\n`;
+
+  md += `**Summary:** ${fields.summary || "N/A"}\n`;
+  md += `**Status:** ${fields.status?.name || "N/A"}\n`;
+  md += `**Type:** ${fields.issuetype?.name || "N/A"}\n`;
+  md += `**Project:** ${fields.project?.key || "N/A"} (${fields.project?.name || "N/A"})\n`;
+  md += `**Priority:** ${fields.priority?.name || "N/A"}\n`;
+  md += `**Reporter:** ${fields.reporter?.displayName || "N/A"} ${fields.reporter?.emailAddress ? `(${fields.reporter.emailAddress})` : ''}\n`;
+  md += `**Assignee:** ${fields.assignee?.displayName || "Unassigned"} ${fields.assignee?.emailAddress ? `(${fields.assignee.emailAddress})` : ''}\n`;
+  md += `**Created:** ${fields.created ? new Date(fields.created).toLocaleString() : "N/A"}\n`;
+  md += `**Updated:** ${fields.updated ? new Date(fields.updated).toLocaleString() : "N/A"}\n`;
+
+  if (fields.labels && fields.labels.length > 0) {
+    md += `**Labels:** ${fields.labels.join(", ")}\n`;
+  }
+
+  // Description (basic handling, ADF is complex)
+  md += "\n## Description\n";
+  if (fields.description) {
+    // JIRA description is often in Atlassian Document Format (ADF)
+    // For a simple markdown display, we might extract text content.
+    // This is a placeholder for more sophisticated ADF to Markdown conversion if needed.
+    if (typeof fields.description === 'string') {
+      md += `${fields.description}\n`;
+    } else if (fields.description.type === 'doc' && fields.description.content) {
+      let descText = "";
+      function extractTextFromAdf(node: any) {
+        if (node.type === 'text') {
+          descText += node.text;
+        }
+        if (node.content) {
+          node.content.forEach(extractTextFromAdf);
+        }
+        if (node.type === 'paragraph') { // Add newlines for paragraphs
+          descText += '\n';
+        }
+      }
+      fields.description.content.forEach(extractTextFromAdf);
+      md += descText.trim() ? descText.trim() + '\n' : "No description provided.\n";
+    } else {
+      md += "Description not in a recognizable format.\n";
+    }
+  } else {
+    md += "No description provided.\n";
+  }
+
+  // Sub-tasks
+  if (fields.subtasks && fields.subtasks.length > 0) {
+    md += "\n## Sub-tasks\n";
+    fields.subtasks.forEach((subtask: any) => {
+      md += `- [${subtask.key}](${baseUrl}/browse/${subtask.key}): ${subtask.fields?.summary || 'N/A'} (${subtask.fields?.status?.name || 'N/A'})\n`;
+    });
+  }
+
+  // Issue Links (e.g., Epic, Parent)
+  if (fields.issuelinks && fields.issuelinks.length > 0) {
+    md += "\n## Linked Issues\n";
+    const epicLinkType = fields.issuelinks.find((link: any) => link.type?.name === "Epic-Story Link" && link.inwardIssue);
+    if (epicLinkType) {
+      const epic = epicLinkType.inwardIssue;
+      md += `**Epic:** [${epic.key}](${baseUrl}/browse/${epic.key}) - ${epic.fields?.summary || 'N/A'}\n`;
+    }
+    // Generic links (blocks, relates to, etc.)
+    fields.issuelinks.forEach((link: any) => {
+      if (link.type?.name !== "Epic-Story Link") {
+        const direction = link.outwardIssue ? "outward" : "inward";
+        const issue = link.outwardIssue || link.inwardIssue;
+        if (issue) {
+          md += `- ${link.type?.[direction + "Desc"] || link.type?.name}: [${issue.key}](${baseUrl}/browse/${issue.key}) - ${issue.fields?.summary || 'N/A'}\n`;
+        }
+      }
+    });
+  }
+  
+  // Comments (last 3)
+  if (fields.comment && fields.comment.comments && fields.comment.comments.length > 0) {
+    md += "\n## Comments\n";
+    const comments = fields.comment.comments;
+    const recentComments = comments.slice(-3); // Get last 3 comments
+    recentComments.forEach((comment: any) => {
+      md += `
+**${comment.author?.displayName || "User"}** (${new Date(comment.created).toLocaleString()}):
+`;
+      // Basic ADF text extraction for comments too
+      if (typeof comment.body === 'string') {
+        md += `> ${comment.body.replace(/\\n/g, '\\n>')}\n`; // Basic blockquote
+      } else if (comment.body?.type === 'doc' && comment.body?.content) {
+        let commentText = "";
+        function extractTextFromAdfComment(node: any) {
+          if (node.type === 'text') commentText += node.text;
+          if (node.content) node.content.forEach(extractTextFromAdfComment);
+          if (node.type === 'paragraph') commentText += '\n';
+        }
+        comment.body.content.forEach(extractTextFromAdfComment);
+        md += `> ${commentText.trim().replace(/\\n/g, '\\n>')}\n`;
+      } else {
+        md += "> Comment not in a recognizable format.\n";
+      }
+    });
+  }
+
+  // Attachments
+  if (fields.attachment && fields.attachment.length > 0) {
+    md += "\n## Attachments\n";
+    fields.attachment.forEach((att: any) => {
+      md += `- [${att.filename}](${att.content}) (${(att.size / 1024).toFixed(2)} KB)\n`;
+    });
+  }
+
+  md += `\n---\n[View full ticket in JIRA](${ticketUrl})\n`;
+  return md;
+}
+
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
   appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
   switch (input.action) {
@@ -466,9 +622,48 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         };
       }
       break;
+    case "read":
+      if (input.domain === "ticket") {
+        const issueKeyToFetch = input.context.issueKey;
+        if (!issueKeyToFetch) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (read): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for read action.",
+            json: { error: "issueKey is required" },
+          };
+        }
+        appendJiraToolLog(`[INFO] jiraToolHandler (read): Fetching details for issueKey: ${issueKeyToFetch}`);
+        try {
+          const ticketData = await getJiraTicketByKey(issueKeyToFetch) as any; 
+          const ticketUrl = `${getJiraEnv().baseUrl}/browse/${ticketData.key}`;
+          const markdownSummary = formatJiraTicketToMarkdown(ticketData);
+          
+          return {
+            markdown: markdownSummary,
+            json: ticketData, // Full JSON data
+            url: ticketUrl,
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (read): Failed to fetch ${issueKeyToFetch}: ${errorMsg}`);
+          return {
+            markdown: `❌ Error fetching JIRA ticket ${issueKeyToFetch}: ${errorMsg}`,
+            json: { error: errorMsg, issueKey: issueKeyToFetch },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (read): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: read action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for read" }
+        };
+      }
     case "find":
       if (input.domain === "ticket") {
+        // Simplified 'find' action: primarily for finding assigned tickets. 
+        // For finding a specific ticket by key, use 'read'.
         const projectKey = input.context.projectKey || '';
+        appendJiraToolLog(`[INFO] jiraToolHandler (find/ticket): Finding assigned tickets for projectKey: '${projectKey}'`);
         const tickets = await findAssignedTickets(projectKey) as Record<string, unknown>[];
         let markdown = projectKey
           ? `# Tickets assigned to you in project ${projectKey}\n\n`
@@ -498,9 +693,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
     }
     // Add more cases for update, list, sync, etc.
     default:
-      throw new Error("Unsupported action/domain combination");
+      appendJiraToolLog(`[ERROR] jiraToolHandler: Unsupported action/domain: Action=${input.action}, Domain=${input.domain}`);
+      throw new Error("Unsupported action/domain combination or not implemented yet.");
   }
-  throw new Error("Not implemented yet or invalid action/domain for this path."); // Adjusted default error
+  // Fallback error if a case doesn't return or throw (should ideally not be reached with comprehensive cases)
+  appendJiraToolLog(`[ERROR] jiraToolHandler: Reached end of switch without valid action for Action=${input.action}, Domain=${input.domain}`);
+  throw new Error("Not implemented yet or invalid action/domain for this path."); 
 }
 
 // Integration points:
