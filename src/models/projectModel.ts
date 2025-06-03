@@ -652,7 +652,7 @@ export async function generateProjectStarterPrompt(projectId: string): Promise<s
   if (projectFilesAppendix) {
     prompt += projectFilesAppendix;
   }
-
+  
   // Save the prompt as a markdown file in the project directory
   const { projectDir } = getProjectPaths(projectId);
   const promptFile = path.join(projectDir, `starter-prompt-${new Date().toISOString().split('T')[0]}.md`);

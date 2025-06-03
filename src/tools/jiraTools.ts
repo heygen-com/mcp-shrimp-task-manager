@@ -77,6 +77,52 @@ interface BasicJiraTicket {
   self?: string;
 }
 
+// Interfaces for JIRA Changelog
+interface JiraChangelogItem {
+  field: string; // e.g., "status", "assignee", "Summary"
+  fieldtype: string; // e.g., "jira", "custom"
+  fieldId?: string; // e.g., "status", "assignee", "summary"
+  from: string | null; // Old value ID (e.g., status ID, user key)
+  fromString: string | null; // Old value display string
+  to: string | null; // New value ID
+  toString: string | null; // New value display string
+}
+
+interface JiraChangelogEntry {
+  id: string;
+  author: JiraUser; // Re-use JiraUser interface
+  created: string; // Timestamp of the change
+  items: JiraChangelogItem[];
+  historyMetadata?: Record<string, unknown>; // For additional metadata if present
+}
+
+interface JiraChangelog {
+  startAt: number;
+  maxResults: number;
+  total: number;
+  values: JiraChangelogEntry[]; // This is the array of actual history events
+}
+
+function timeAgo(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.round((now.getTime() - date.getTime()) / 1000);
+  const minutes = Math.round(seconds / 60);
+  const hours = Math.round(minutes / 60);
+  const days = Math.round(hours / 24);
+  const weeks = Math.round(days / 7);
+  const months = Math.round(days / 30.44); // Average days in month
+  const years = Math.round(days / 365.25); // Account for leap year
+
+  if (seconds < 60) return `${seconds} seconds ago`;
+  if (minutes < 60) return minutes === 1 ? `1 minute ago` : `${minutes} minutes ago`;
+  if (hours < 24) return hours === 1 ? `1 hour ago` : `${hours} hours ago`;
+  if (days < 7) return days === 1 ? `1 day ago` : `${days} days ago`;
+  if (weeks < 5) return weeks === 1 ? `1 week ago` : `${weeks} weeks ago`; // Up to 4 weeks
+  if (months < 12) return months === 1 ? `1 month ago` : `${months} months ago`;
+  return years === 1 ? `1 year ago` : `${years} years ago`;
+}
+
 const jiraToolLogPath = '/tmp/mcp_shrimp_jira_tool.log';
 
 function appendJiraToolLog(message: string) {
@@ -91,7 +137,7 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history"]),
   domain: z.enum(["ticket", "project", "component", "migration", "user"]),
   context: z.object({
     projectKey: z.string().optional(),
@@ -110,6 +156,8 @@ export const JiraToolSchema = z.object({
     // fetchExactMatch is no longer needed for a dedicated 'read' action for specific tickets.
     // It might be repurposed if 'find' evolves to support more complex queries.
     fetchExactMatch: z.boolean().optional(), // Flag to fetch a single specific ticket
+    page: z.number().optional(),
+    limit: z.number().optional(),
   }).passthrough().optional(), // For future extensibility
 });
 
@@ -668,6 +716,81 @@ async function updateJiraTicket(issueKey: string, updatePayload: Record<string, 
   return true; 
 }
 
+// Helper to fetch the changelog/history for a JIRA ticket
+async function getJiraTicketHistory(issueKey: string, page: number = 1, limit: number = 100): Promise<JiraChangelog> {
+  appendJiraToolLog(`[INFO] getJiraTicketHistory: Attempting to fetch changelog for issue: ${issueKey}, page: ${page}, limit: ${limit}`);
+  const { baseUrl, email, apiToken } = getJiraEnv();
+  const startAt = (page - 1) * limit;
+  const url = `${baseUrl}/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=${limit}`;
+  const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+
+  appendJiraToolLog(`[INFO] getJiraTicketHistory: Fetching URL: ${url}`);
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Authorization": `Basic ${auth}`,
+      "Accept": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    appendJiraToolLog(`[ERROR] getJiraTicketHistory: JIRA API error fetching changelog for '${issueKey}': ${res.status} ${errorText}`);
+    throw new Error(`JIRA API error fetching changelog for ${issueKey}: ${res.status} ${errorText}`);
+  }
+  
+  const changelogData = await res.json() as JiraChangelog; 
+  appendJiraToolLog(`[INFO] getJiraTicketHistory: Successfully fetched changelog page for ${issueKey}. Found ${changelogData.values?.length || 0} items.`);
+  return changelogData; 
+}
+
+function formatChangelogToTimelineMarkdown(issueKey: string, changelog: JiraChangelog): string {
+  if (!changelog || !changelog.values || changelog.values.length === 0) {
+    return `No history found for JIRA ticket [${issueKey}](${getJiraEnv().baseUrl}/browse/${issueKey}).`;
+  }
+
+  let md = `# Change Log for JIRA Ticket [${issueKey}](${getJiraEnv().baseUrl}/browse/${issueKey})\n\n`;
+
+  const sortedEntries = [...changelog.values].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+  for (const entry of sortedEntries) {
+    const authorName = entry.author?.displayName || "Unknown User";
+    const relativeTime = timeAgo(entry.created);
+
+    for (const item of entry.items) {
+      let from = item.fromString || item.from || "nothing";
+      let to = item.toString || item.to || "something";
+      const fieldName = item.field;
+
+      // Sanitize and simplify display for certain fields
+      if (fieldName.toLowerCase() === "description" || fieldName.toLowerCase() === "summary" || fieldName.toLowerCase().includes("comment")) {
+        if (from && from.length > 70) from = from.substring(0, 70) + "...";
+        if (to && to.length > 70) to = to.substring(0, 70) + "...";
+      }
+      
+      md += `- `;
+      if (item.field.toLowerCase() === "attachment" && item.fromString === null) {
+        md += `Added attachment: **${to}**\n`;
+      } else if (item.field.toLowerCase() === "attachment" && item.toString === null) {
+        md += `Removed attachment: **${from}**\n`;
+      } else if (item.field.toLowerCase() === "sprint" && item.fromString && item.toString) {
+        md += `Changed **${fieldName}** from _some sprint(s)_ to _other sprint(s)_\n`;
+      } else if (item.field.toLowerCase().includes("rank")) {
+        md += `Changed **${fieldName}** (Ranked higher/lower)\n`;
+      } else {
+        md += `Changed **${fieldName}** from _${from}_ to _${to}_\n`;
+      }
+      md += `  *By ${authorName}, ${relativeTime}*\n\n`; 
+    }
+  }
+
+  if (changelog.total > changelog.values.length) {
+    md += `\n*Displaying ${changelog.values.length} of ${changelog.total} history entries. Use options.page and options.limit to paginate.*\n`;
+  }
+
+  return md;
+}
+
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
   appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
   switch (input.action) {
@@ -973,6 +1096,41 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         };
       }
     }
+    case "history":
+      if (input.domain === "ticket") {
+        const issueKey = input.context.issueKey;
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (history): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for history action.",
+            json: { error: "issueKey is required" },
+          };
+        }
+        appendJiraToolLog(`[INFO] jiraToolHandler (history): Fetching history for issue: ${issueKey}`);
+        try {
+          const historyData = await getJiraTicketHistory(issueKey, input.options?.page, input.options?.limit);
+          const markdownSummary = formatChangelogToTimelineMarkdown(issueKey, historyData);
+          
+          return {
+            markdown: markdownSummary,
+            json: historyData, // Return the raw changelog data as well
+            url: `${getJiraEnv().baseUrl}/browse/${issueKey}?focusedCommentId=&page=com.atlassian.jira.plugin.system.issuetabpanels%3Achangelog-tabpanel`,
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (history): Failed to fetch history for ${issueKey}: ${errorMsg}`);
+          return {
+            markdown: `❌ Error fetching history for JIRA ticket ${issueKey}: ${errorMsg}`,
+            json: { error: errorMsg, issueKey },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (history): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: history action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for history action" }
+        };
+      }
     default:
       appendJiraToolLog(`[ERROR] jiraToolHandler: Unsupported action/domain: Action=${input.action}, Domain=${input.domain}`);
       return {
