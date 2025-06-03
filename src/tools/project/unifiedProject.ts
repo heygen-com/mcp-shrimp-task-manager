@@ -595,6 +595,11 @@ export async function project(params: z.infer<typeof projectSchema>) {
             markdown += projectFilesAppendix;
           }
 
+          // --- EXPERIMENTAL: Copy to Clipboard --- 
+          await attemptCopyToClipboard(markdown);
+          markdown += "\n\n---\n[EXPERIMENTAL] Project context has been prepared. If clipboard integration is enabled and functional, the context should be in your clipboard. Otherwise, it has been logged (see debug logs).";
+          // --- END EXPERIMENTAL --- 
+
           // Respond with the combined markdown
           return { content: [{ type: "text", text: markdown }] };
         } else {
@@ -814,6 +819,39 @@ async function handleSystemCheck() {
   // Remove or implement handleSystemCheck as needed. For now, return a placeholder.
   return { content: [{ type: "text", text: "System check not implemented." }] };
 }
+
+// --- EXPERIMENTAL: Clipboard Helper ---
+async function attemptCopyToClipboard(content: string): Promise<void> {
+  await logDebug("[EXPERIMENTAL] Attempting to copy project context to clipboard...");
+  // In a real implementation, you would use a library like 'clipboardy' here.
+  // Example (requires 'clipboardy' to be installed and for this to be an ESM module if using await import):
+  // try {
+  //   const clipboardy = await import('clipboardy');
+  //   await clipboardy.default.write(content);
+  //   await logDebug("[EXPERIMENTAL] Content successfully copied to clipboard.");
+  // } catch (err) {
+  //   const errorMessage = err instanceof Error ? err.message : String(err);
+  //   await logDebug(`[EXPERIMENTAL] Failed to copy to clipboard: ${errorMessage}. Content logged below.`);
+  //   await logDebug("--- BEGIN CLIPBOARD CONTENT ---");
+  //   await logDebug(content);
+  //   await logDebug("--- END CLIPBOARD CONTENT ---");
+  // }
+
+  // Placeholder for now, as direct clipboard access is environment-dependent:
+  await logDebug("[EXPERIMENTAL] Clipboard copy functionality is a placeholder. Content that would be copied is logged below:");
+  await logDebug("--- BEGIN PROJECT CONTEXT FOR CLIPBOARD (EXPERIMENTAL) ---");
+  // To avoid excessively long single log lines, let's log in chunks if very long
+  const chunkSize = 4000;
+  if (content.length > chunkSize) {
+    for (let i = 0; i < content.length; i += chunkSize) {
+      await logDebug(content.substring(i, i + chunkSize));
+    }
+  } else {
+    await logDebug(content);
+  }
+  await logDebug("--- END PROJECT CONTEXT FOR CLIPBOARD (EXPERIMENTAL) ---");
+}
+// --- END EXPERIMENTAL --- 
 
 // --- Logging helper ---
 const logPath = "/tmp/mcp_project_open_debug.log";
