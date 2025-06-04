@@ -296,8 +296,23 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
           };
         }
         
-        // Parse comments for tasks
-        const parseResult = parseCommentsForTasks(comments);
+        // Get comment tasks
+        const parseOptions = {
+          includeMedia: false,  // Don't need media for sync
+          baseUrl: undefined,
+          auth: undefined
+        };
+        const parseResult = await parseCommentsForTasks(comments, parseOptions);
+        
+        if (parseResult.totalTasks === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `## 📝 No Tasks Found\n\nJIRA ticket ${input.issueKey} has no tasks to scan for comment tasks.`
+            }]
+          };
+        }
+        
         const markdown = formatCommentTasksAsMarkdown(parseResult);
         
         return {
@@ -324,7 +339,12 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         // Mock JIRA ticket fetch and parse comments
         const ticketData = await getJiraTicket(input.issueKey);
         const comments = ticketData.fields?.comment?.comments || [];
-        const parseResult = parseCommentsForTasks(comments);
+        const parseOptions = {
+          includeMedia: false,  // Don't need media for sync
+          baseUrl: undefined,
+          auth: undefined
+        };
+        const parseResult = await parseCommentsForTasks(comments, parseOptions);
         
         // Filter for new tasks only
         const processedTaskIds = new Set(syncMetadata.processedCommentTaskIds || []);
@@ -385,7 +405,12 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         // Mock JIRA ticket fetch and parse comments
         const ticketData = await getJiraTicket(input.issueKey);
         const comments = ticketData.fields?.comment?.comments || [];
-        const parseResult = parseCommentsForTasks(comments);
+        const parseOptions = {
+          includeMedia: false,  // Don't need media for sync
+          baseUrl: undefined,
+          auth: undefined
+        };
+        const parseResult = await parseCommentsForTasks(comments, parseOptions);
         
         // Filter for new tasks only
         const processedTaskIds = new Set(syncMetadata.processedCommentTaskIds || []);

@@ -8,7 +8,7 @@ import {
   parseCommentsForTasks, 
   parseCommentForTasks,
   formatCommentTasksAsMarkdown,
-  downloadImageAsBase64
+  EnhancedCommentTask
 } from "../utils/jiraCommentTaskParser.js";
 import { 
   jiraCommentService, 
@@ -1474,33 +1474,17 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             auth: auth
           };
           
-          const parseResult = parseCommentsForTasks(comments, parseOptions);
+          const parseResult = await parseCommentsForTasks(comments, parseOptions);
           
-          // Optionally download images as base64
-          if (downloadImages && parseResult.tasks.some(task => task.media && task.media.length > 0)) {
-            appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Downloading images as base64...`);
-            
-            for (const task of parseResult.tasks) {
-              if (task.media) {
-                for (const mediaItem of task.media) {
-                  if (mediaItem.downloadUrl && auth) {
-                    const base64Data = await downloadImageAsBase64(mediaItem.downloadUrl, auth);
-                    if (base64Data) {
-                      (mediaItem as Record<string, unknown>).base64Data = base64Data;
-                      appendJiraToolLog(`[INFO] Successfully downloaded image: ${mediaItem.downloadUrl}`);
-                    }
-                  }
-                }
-              }
-            }
-          }
-          
+          // Optionally download images as base64 (this is now handled automatically in parseCommentsForTasks)
           const markdown = formatCommentTasksAsMarkdown(parseResult);
           
-          // Enhanced response with media information
+          // Enhanced response with media information and UI context
           let enhancedMarkdown = `# Comment Tasks for ${issueKey}\n\n${markdown}`;
           
           const tasksWithMedia = parseResult.tasks.filter(task => task.media && task.media.length > 0);
+          const tasksWithContext = parseResult.tasks.filter(task => (task as EnhancedCommentTask).uiContext && (task as EnhancedCommentTask).uiContext!.searchQueries.length > 0);
+          
           if (tasksWithMedia.length > 0) {
             enhancedMarkdown += `\n\n## 📷 Tasks with Associated Media (${tasksWithMedia.length})\n\n`;
             
@@ -1515,37 +1499,61 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                   enhancedMarkdown += `- URL: ${media.downloadUrl || media.url || 'N/A'}\n`;
                   if (media.alt) enhancedMarkdown += `- Alt text: ${media.alt}\n`;
                   if (media.width && media.height) enhancedMarkdown += `- Dimensions: ${media.width}x${media.height}\n`;
-                  if ((media as Record<string, unknown>).base64Data) enhancedMarkdown += `- Base64 data: Available in JSON response\n`;
                   enhancedMarkdown += `\n`;
                 });
               }
+              
+              // Show downloaded images info
+              const enhancedTask = task as EnhancedCommentTask;
+              if (enhancedTask.downloadedImages) {
+                enhancedMarkdown += `**Downloaded Images:** ${enhancedTask.downloadedImages.filter(img => !img.error).length}/${enhancedTask.downloadedImages.length} successful\n`;
+              }
+              
+              enhancedMarkdown += `\n`;
+            });
+          }
+          
+          if (tasksWithContext.length > 0) {
+            enhancedMarkdown += `\n\n## 🎯 Tasks with UI Context (${tasksWithContext.length})\n\n`;
+            
+            tasksWithContext.forEach((task, index) => {
+              const enhancedTask = task as EnhancedCommentTask;
+              enhancedMarkdown += `### ${index + 1}. ${enhancedTask.uiContext!.enhancedDescription}\n`;
+              enhancedMarkdown += `**Suggested codebase searches:**\n`;
+              enhancedTask.uiContext!.searchQueries.slice(0, 5).forEach((query: string) => {
+                enhancedMarkdown += `- \`${query}\`\n`;
+              });
               enhancedMarkdown += `\n`;
             });
           }
           
           // Organize by comment for easy agent consumption
-          const commentData = comments.map((comment, index) => {
-            const commentResult = parseCommentForTasks(comment, index, parseOptions);
-            return {
-              commentId: comment.id || `comment_${index}`,
+          const commentData = [];
+          for (let i = 0; i < comments.length; i++) {
+            const comment = comments[i];
+            const commentResult = await parseCommentForTasks(comment, i, parseOptions);
+            commentData.push({
+              commentId: comment.id || `comment_${i}`,
               author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
               created: comment.created,
               tasks: commentResult.tasks,
-              hasMedia: commentResult.tasks.some(task => task.media && task.media.length > 0)
-            };
-          }).filter(c => c.tasks.length > 0);
+              hasMedia: commentResult.tasks.some(task => task.media && task.media.length > 0),
+              hasUIContext: commentResult.tasks.some(task => (task as EnhancedCommentTask).uiContext && (task as EnhancedCommentTask).uiContext!.searchQueries.length > 0)
+            });
+          }
           
           return {
             markdown: enhancedMarkdown,
             json: {
               issueKey,
-              comments: commentData,
+              comments: commentData.filter(c => c.tasks.length > 0),
               totalTasks: parseResult.totalTasks,
               pendingTasks: parseResult.pendingTasks,
               completedTasks: parseResult.completedTasks,
               mediaSupport: includeMedia,
               imagesDownloaded: downloadImages,
-              tasksWithMedia: tasksWithMedia.length
+              tasksWithMedia: tasksWithMedia.length,
+              tasksWithContext: tasksWithContext.length
             },
             url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
           };

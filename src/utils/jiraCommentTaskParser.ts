@@ -208,29 +208,41 @@ function cleanTaskText(text: string): string {
 }
 
 /**
- * Parse a single JIRA comment for task patterns
+ * Parse a single JIRA comment for task patterns with enhanced UI context extraction
  */
-export function parseCommentForTasks(
+export async function parseCommentForTasks(
   comment: JiraComment, 
   commentIndex: number = 0,
   options: { includeMedia?: boolean; baseUrl?: string; auth?: string } = {}
-): CommentTaskParseResult {
+): Promise<CommentTaskParseResult> {
   appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Starting parse for comment ${comment.id || commentIndex}, author: ${comment.author?.displayName}`);
   
   const commentText = extractCommentText(comment.body);
   appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Extracted comment text length: ${commentText.length}`);
   appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Full comment text: "${commentText}"`);
   
-  const tasks: CommentTask[] = [];
+  const tasks: EnhancedCommentTask[] = [];
   const lines = commentText.split('\n');
   appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Split into ${lines.length} lines`);
   
   // Extract media from ADF if available
   let commentMedia: CommentMedia[] = [];
+  let downloadedImages: { id: string; base64Data: string; contentType: string; error?: string }[] = [];
+  
   if (options.includeMedia && comment.body && typeof comment.body === 'object' && options.baseUrl) {
     commentMedia = extractMediaFromAdf(comment.body as AdfNode, options.baseUrl);
     appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Found ${commentMedia.length} media items`);
+    
+    // Download images with authentication if available
+    if (commentMedia.length > 0 && options.auth) {
+      downloadedImages = await downloadAuthenticatedImages(commentMedia, options.auth);
+      appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Downloaded ${downloadedImages.filter(img => !img.error).length}/${downloadedImages.length} images successfully`);
+    }
   }
+  
+  // Extract UI context hints from the entire comment
+  const uiContext = extractUIContextHints(commentText);
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Extracted UI context - Pages: [${uiContext.pages.join(', ')}], Components: [${uiContext.components.join(', ')}], Actions: [${uiContext.actions.join(', ')}]`);
   
   lines.forEach((line, lineIndex) => {
     appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Processing line ${lineIndex}: "${line}"`);
@@ -260,7 +272,17 @@ export function parseCommentForTasks(
           matches[0]
         );
         
-        const task: CommentTask = {
+        // Create enhanced description with UI context
+        let enhancedDescription = taskText;
+        if (uiContext.pages.length > 0 || uiContext.components.length > 0 || uiContext.actions.length > 0) {
+          const contextParts = [];
+          if (uiContext.pages.length > 0) contextParts.push(`Pages: ${uiContext.pages.join(', ')}`);
+          if (uiContext.components.length > 0) contextParts.push(`Components: ${uiContext.components.join(', ')}`);
+          if (uiContext.actions.length > 0) contextParts.push(`Actions: ${uiContext.actions.join(', ')}`);
+          enhancedDescription = `${taskText} | Context: ${contextParts.join(' | ')}`;
+        }
+        
+        const task: EnhancedCommentTask = {
           id: commentTaskId,
           text: taskText,
           completed: isTaskCompleted(matches[0]),
@@ -270,10 +292,17 @@ export function parseCommentForTasks(
           originalPattern: matches[0].trim(),
           lineNumber: lineIndex,
           contextText: getTaskContext(lines, lineIndex),
-          media: commentMedia.length > 0 ? commentMedia : undefined
+          media: commentMedia.length > 0 ? commentMedia : undefined,
+          uiContext: {
+            ...uiContext,
+            enhancedDescription
+          },
+          downloadedImages: downloadedImages.length > 0 ? downloadedImages : undefined
         };
         
-        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Created task - ID: ${task.id}, text: "${task.text}", completed: ${task.completed}`);
+        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Created enhanced task - ID: ${task.id}, text: "${task.text}", completed: ${task.completed}`);
+        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Enhanced description: "${task.uiContext?.enhancedDescription}"`);
+        
         tasks.push(task);
       } else {
         // Only log for first few patterns to avoid spam
@@ -301,25 +330,26 @@ export function parseCommentForTasks(
 /**
  * Parse multiple JIRA comments for tasks with optional media support
  */
-export function parseCommentsForTasks(
+export async function parseCommentsForTasks(
   comments: JiraComment[], 
   options: { includeMedia?: boolean; baseUrl?: string; auth?: string } = {}
-): CommentTaskParseResult {
+): Promise<CommentTaskParseResult> {
   appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Starting to parse ${comments.length} comments`);
   appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Options: includeMedia=${options.includeMedia}, baseUrl=${options.baseUrl}, hasAuth=${!!options.auth}`);
   
   const allTasks: CommentTask[] = [];
   
-  comments.forEach((comment, index) => {
+  for (let index = 0; index < comments.length; index++) {
+    const comment = comments[index];
     appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Processing comment ${index + 1}/${comments.length}, ID: ${comment.id}`);
     appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment author: ${comment.author?.displayName}, created: ${comment.created}`);
     appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment body type: ${typeof comment.body}, has content: ${!!comment.body}`);
     
-    const result = parseCommentForTasks(comment, index, options);
+    const result = await parseCommentForTasks(comment, index, options);
     appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment ${index + 1} yielded ${result.tasks.length} tasks`);
     
     allTasks.push(...result.tasks);
-  });
+  }
   
   const completedTasks = allTasks.filter(t => t.completed).length;
   const pendingTasks = allTasks.filter(t => !t.completed).length;
@@ -503,4 +533,172 @@ export async function downloadImageAsBase64(url: string, auth?: string): Promise
     appendJiraCommentLog(`Error downloading image from ${url}: ${errorMessage}`);
     return null;
   }
+}
+
+/**
+ * Extract UI context hints from comment text for codebase correlation
+ */
+function extractUIContextHints(text: string): {
+  pages: string[];
+  components: string[];
+  actions: string[];
+  searchQueries: string[];
+} {
+  const pages: string[] = [];
+  const components: string[] = [];
+  const actions: string[] = [];
+  const searchQueries: string[] = [];
+
+  // Extract page mentions
+  const pagePatterns = [
+    /(?:on the |in the |from the )?(\w+)\s+page/gi,
+    /(?:page|view|screen)[\s:]+(\w+)/gi
+  ];
+  
+  pagePatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const page = match[1].toLowerCase();
+      if (page && !['this', 'that', 'the', 'a', 'an'].includes(page)) {
+        pages.push(page);
+        searchQueries.push(`${page} page`);
+        searchQueries.push(`pages/${page}`);
+      }
+    }
+  });
+
+  // Extract component mentions
+  const componentPatterns = [
+    /(?:this |the |a )?(\w+)\s+(?:menu|button|dialog|modal|popup|dropdown|form|input|field)/gi,
+    /(?:menu|button|dialog|modal|popup|dropdown|form|input|field)[\s:]+(\w+)/gi
+  ];
+  
+  componentPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const component = match[1].toLowerCase();
+      if (component && !['this', 'that', 'the', 'a', 'an'].includes(component)) {
+        components.push(component);
+        searchQueries.push(`${component} component`);
+        searchQueries.push(`${component}Menu`);
+        searchQueries.push(`${component}Button`);
+      }
+    }
+  });
+
+  // Extract action mentions (likely to be i18n keys)
+  const actionPatterns = [
+    /"([^"]+)" (?:option|button|link|text|label)/gi,
+    /(?:localize|translate)\s+(?:the\s+)?["']?([^"'\n]+)["']?/gi,
+    /(?:button|option|link|text|label)[\s:]+["']?([^"'\n]+)["']?/gi
+  ];
+  
+  actionPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const action = match[1].trim();
+      if (action && action.length > 2 && action.length < 50) {
+        actions.push(action);
+        // Generate common i18n key patterns
+        const snakeCase = action.toLowerCase().replace(/\s+/g, '_');
+        const camelCase = action.toLowerCase().replace(/\s+(.)/g, (_, letter) => letter.toUpperCase());
+        searchQueries.push(action);
+        searchQueries.push(snakeCase);
+        searchQueries.push(camelCase);
+        searchQueries.push(`"${action}"`);
+      }
+    }
+  });
+
+  return {
+    pages: [...new Set(pages)],
+    components: [...new Set(components)],
+    actions: [...new Set(actions)],
+    searchQueries: [...new Set(searchQueries)]
+  };
+}
+
+/**
+ * Enhanced CommentTask interface with UI context
+ */
+export interface EnhancedCommentTask extends CommentTask {
+  uiContext?: {
+    pages: string[];
+    components: string[];
+    actions: string[];
+    searchQueries: string[];
+    enhancedDescription?: string;
+  };
+  downloadedImages?: {
+    id: string;
+    base64Data: string;
+    contentType: string;
+    error?: string;
+  }[];
+}
+
+/**
+ * Download authenticated JIRA images and convert to base64
+ */
+async function downloadAuthenticatedImages(
+  media: CommentMedia[], 
+  auth?: string
+): Promise<{ id: string; base64Data: string; contentType: string; error?: string }[]> {
+  if (!auth || media.length === 0) {
+    return [];
+  }
+  
+  const downloadedImages = [];
+  
+  for (const mediaItem of media) {
+    if (mediaItem.downloadUrl) {
+      appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Downloading ${mediaItem.downloadUrl}`);
+      
+      try {
+        const response = await fetch(mediaItem.downloadUrl, {
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Accept': 'image/*'
+          }
+        });
+        
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const contentType = response.headers.get('content-type') || 'image/png';
+          const base64Data = `data:${contentType};base64,${buffer.toString('base64')}`;
+          
+          downloadedImages.push({
+            id: mediaItem.id || 'unknown',
+            base64Data,
+            contentType
+          });
+          
+          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Successfully downloaded ${mediaItem.downloadUrl}, size: ${buffer.length} bytes`);
+        } else {
+          const errorText = await response.text();
+          downloadedImages.push({
+            id: mediaItem.id || 'unknown',
+            base64Data: '',
+            contentType: '',
+            error: `HTTP ${response.status}: ${errorText}`
+          });
+          
+          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Failed to download ${mediaItem.downloadUrl}: ${response.status} ${errorText}`);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        downloadedImages.push({
+          id: mediaItem.id || 'unknown',
+          base64Data: '',
+          contentType: '',
+          error: errorMessage
+        });
+        
+        appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Exception downloading ${mediaItem.downloadUrl}: ${errorMessage}`);
+      }
+    }
+  }
+  
+  return downloadedImages;
 } 
