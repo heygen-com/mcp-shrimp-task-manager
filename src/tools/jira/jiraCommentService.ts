@@ -1,6 +1,7 @@
 import "dotenv/config";
 import fetch from "node-fetch";
 import { z } from "zod";
+import { getJiraCredentials } from "../../utils/jiraCredentials.js";
 
 // Interfaces for JIRA Comment CRUD operations
 export interface JiraUser {
@@ -169,13 +170,7 @@ export const ListCommentsSchema = z.object({
 
 // Helper to get JIRA credentials from env
 function getJiraEnv() {
-  const baseUrl = process.env.JIRA_BASE_URL;
-  const email = process.env.JIRA_USER_EMAIL;
-  const apiToken = process.env.JIRA_API_TOKEN;
-  if (!baseUrl || !email || !apiToken) {
-    throw new Error("Missing JIRA credentials in environment variables");
-  }
-  return { baseUrl, email, apiToken };
+  return getJiraCredentials();
 }
 
 // Helper to convert plain text to Atlassian Document Format (ADF)
@@ -191,6 +186,144 @@ function toADF(text: string): AdfNode {
         ]
       }
     ]
+  };
+}
+
+// Helper to create interactive ADF task list
+function createAdfTaskList(tasks: Array<{ text: string; completed?: boolean; id?: string }>): AdfNode {
+  const taskItems = tasks.map((task, index) => ({
+    type: "taskItem",
+    attrs: {
+      localId: task.id || `task-${Date.now()}-${index}`,
+      state: task.completed ? "DONE" : "TODO"
+    },
+    content: [
+      {
+        type: "text",
+        text: task.text
+      }
+    ]
+  }));
+
+  return {
+    type: "taskList",
+    attrs: {
+      localId: `tasklist-${Date.now()}`
+    },
+    content: taskItems
+  };
+}
+
+// Helper to create ADF document with task list
+function createAdfWithTaskList(
+  introText: string,
+  tasks: Array<{ text: string; completed?: boolean; id?: string }>,
+  followupText?: string
+): AdfNode {
+  const content: AdfNode[] = [];
+  
+  // Add intro paragraph if provided
+  if (introText.trim()) {
+    content.push({
+      type: "paragraph",
+      content: [{ type: "text", text: introText }]
+    });
+  }
+  
+  // Add task list
+  content.push(createAdfTaskList(tasks));
+  
+  // Add followup paragraph if provided
+  if (followupText?.trim()) {
+    content.push({
+      type: "paragraph", 
+      content: [{ type: "text", text: followupText }]
+    });
+  }
+  
+  return {
+    type: "doc",
+    version: 1,
+    content
+  };
+}
+
+// Helper to parse text and detect task lists for ADF conversion
+function parseTextForTasks(text: string): {
+  hasTaskList: boolean;
+  adfContent?: AdfNode;
+  plainText: string;
+} {
+  const lines = text.split('\n');
+  const tasks: Array<{ text: string; completed: boolean; lineIndex: number }> = [];
+  const nonTaskLines: string[] = [];
+  
+  lines.forEach((line, index) => {
+    let isTask = false;
+    
+    // Check checkbox format [ ] or [x]
+    const checkboxMatch = line.match(/^[ ]*[-*+]?[ ]*\[([x ])\][ ]*(.*?)$/i);
+    if (checkboxMatch) {
+      tasks.push({
+        text: checkboxMatch[2].trim(),
+        completed: checkboxMatch[1].toLowerCase() === 'x',
+        lineIndex: index
+      });
+      isTask = true;
+    }
+    
+    // Check numbered list format
+    else {
+      const numberedMatch = line.match(/^[ ]*\d+\.[ ]*(.*?)$/);
+      if (numberedMatch && numberedMatch[1].trim()) {
+        tasks.push({
+          text: numberedMatch[1].trim(),
+          completed: false,
+          lineIndex: index
+        });
+        isTask = true;
+      }
+    }
+    
+    // Check action-oriented format (- implement, - add, etc.)
+    if (!isTask) {
+      const actionMatch = line.match(/^[ ]*[-*+][ ]+((?:implement|add|fix|update|create|remove|refactor|test|validate|check|ensure|configure)\s+.*)$/i);
+      if (actionMatch) {
+        tasks.push({
+          text: actionMatch[1].trim(),
+          completed: false,
+          lineIndex: index
+        });
+        isTask = true;
+      }
+    }
+    
+    if (!isTask) {
+      nonTaskLines.push(line);
+    }
+  });
+  
+  if (tasks.length === 0) {
+    return {
+      hasTaskList: false,
+      plainText: text
+    };
+  }
+  
+  // Create ADF with task list
+  const introText = nonTaskLines.slice(0, tasks[0]?.lineIndex || 0).join('\n').trim();
+  const followupText = nonTaskLines.slice(tasks[tasks.length - 1]?.lineIndex || 0).join('\n').trim();
+  
+  const adfTasks = tasks.map((task, index) => ({
+    text: task.text,
+    completed: task.completed,
+    id: `task-${Date.now()}-${index}`
+  }));
+  
+  return {
+    hasTaskList: true,
+    adfContent: createAdfWithTaskList(introText, adfTasks, followupText),
+    plainText: text
   };
 }
 
@@ -241,10 +374,15 @@ export class JiraCommentService {
       
       const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment`;
       
-      // Convert plain text to ADF if needed
+      // Convert plain text to ADF if needed, with smart task list detection
       let body = request.body;
       if (typeof body === "string") {
-        body = toADF(body);
+        const taskParseResult = parseTextForTasks(body);
+        if (taskParseResult.hasTaskList && taskParseResult.adfContent) {
+          body = taskParseResult.adfContent;
+        } else {
+          body = toADF(body);
+        }
       }
       
       const payload = {
@@ -282,6 +420,20 @@ export class JiraCommentService {
         error: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+
+  /**
+   * Helper method to create interactive task list comment
+   */
+  createTaskListComment(tasks: Array<{ text: string; completed?: boolean; id?: string }>, introText?: string, followupText?: string): AdfNode {
+    return createAdfWithTaskList(introText || "", tasks, followupText);
+  }
+
+  /**
+   * Helper method to parse text and detect task lists
+   */
+  parseTextForTasks(text: string) {
+    return parseTextForTasks(text);
   }
 
   /**
@@ -733,5 +885,8 @@ export class JiraCommentService {
   }
 }
 
+// Export helper functions for agents to use directly
+export { createAdfTaskList, createAdfWithTaskList, parseTextForTasks };
+
 // Export a singleton instance
-export const jiraCommentService = new JiraCommentService(); 
+export const jiraCommentService = new JiraCommentService();

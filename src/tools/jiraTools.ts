@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import fetch from "node-fetch";
-import fs from "fs/promises";
+import * as fs from "fs/promises";
 import fsSync from 'fs';
 import path from "path";
 import { 
@@ -14,6 +14,7 @@ import {
   JiraCommentCreateRequest, 
   JiraCommentUpdateRequest 
 } from "./jira/jiraCommentService.js";
+import { getJiraCredentials, getCredentialSource } from "../utils/jiraCredentials.js";
 
 // Basic JIRA Interfaces for improved type safety
 interface JiraUser {
@@ -213,15 +214,16 @@ type JiraToolResult = {
 
 // Helper to get JIRA credentials from env
 function getJiraEnv() {
-  const baseUrl = process.env.JIRA_BASE_URL;
-  const email = process.env.JIRA_USER_EMAIL;
-  const apiToken = process.env.JIRA_API_TOKEN;
-  if (!baseUrl || !email || !apiToken) {
-    appendJiraToolLog("[ERROR] getJiraEnv: Missing JIRA credentials in environment variables.");
-    throw new Error("Missing JIRA credentials in environment variables");
-  }
-  appendJiraToolLog("[INFO] getJiraEnv: Credentials successfully retrieved from process.env.");
-  return { baseUrl, email, apiToken };
+  const credentials = getJiraCredentials();
+  const source = getCredentialSource();
+  
+  appendJiraToolLog(`[INFO] getJiraEnv: ${source.details}`);
+  
+  return {
+    baseUrl: credentials.baseUrl,
+    email: credentials.email,
+    apiToken: credentials.apiToken
+  };
 }
 
 // Helper to get project data dir
