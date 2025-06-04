@@ -1529,14 +1529,75 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           
           // Organize by comment for easy agent consumption
           const commentData = [];
+          
+          // Type for enhanced JSON task structure
+          type EnhancedJsonTask = EnhancedCommentTask & {
+            analysisMetadata: {
+              hasImages: boolean;
+              imageCount: number;
+              successfulDownloads: number;
+              totalImageBytes: number;
+              ocrReady: boolean;
+              suggestedOcrTools: string[];
+              componentAnalysisHints: {
+                likelyUIScreenshot: boolean;
+                detectedUIElements: string[];
+                suggestedCodebaseSearches: string[];
+                i18nKeyPatterns: Array<{
+                  original: string;
+                  snakeCase: string;
+                  camelCase: string;
+                  withPrefix: string;
+                }>;
+              };
+            };
+          };
+          
           for (let i = 0; i < comments.length; i++) {
             const comment = comments[i];
             const commentResult = await parseCommentForTasks(comment, i, parseOptions);
+            
+            // Enhance tasks with additional metadata for agent analysis
+            const enhancedTasksForJson = commentResult.tasks.map(task => {
+              const enhancedTask = task as EnhancedCommentTask;
+              return {
+                ...task,
+                // Explicitly include uiContext for proper typing
+                uiContext: enhancedTask.uiContext,
+                // Ensure downloadedImages are included with full base64 data
+                downloadedImages: enhancedTask.downloadedImages || [],
+                // Add analysis metadata
+                analysisMetadata: {
+                  hasImages: (enhancedTask.downloadedImages?.length || 0) > 0,
+                  imageCount: enhancedTask.downloadedImages?.length || 0,
+                  successfulDownloads: enhancedTask.downloadedImages?.filter(img => img.base64Data && !img.error).length || 0,
+                  totalImageBytes: enhancedTask.downloadedImages?.reduce((total, img) => {
+                    return total + (img.base64Data ? Buffer.from(img.base64Data.split(',')[1] || '', 'base64').length : 0);
+                  }, 0) || 0,
+                  // OCR readiness indicators
+                  ocrReady: (enhancedTask.downloadedImages?.filter(img => img.base64Data && !img.error).length || 0) > 0,
+                  suggestedOcrTools: ['tesseract', 'google-vision', 'azure-cognitive'],
+                  // Component analysis hints
+                  componentAnalysisHints: {
+                    likelyUIScreenshot: enhancedTask.uiContext?.pages.length || enhancedTask.uiContext?.components.length ? true : false,
+                    detectedUIElements: enhancedTask.uiContext?.actions || [],
+                    suggestedCodebaseSearches: enhancedTask.uiContext?.searchQueries.slice(0, 10) || [],
+                    i18nKeyPatterns: enhancedTask.uiContext?.actions.map(action => ({
+                      original: action,
+                      snakeCase: action.toLowerCase().replace(/\s+/g, '_'),
+                      camelCase: action.toLowerCase().replace(/\s+(.)/g, (_, letter) => letter.toUpperCase()),
+                      withPrefix: `video_menu_action_${action.toLowerCase().replace(/\s+/g, '_')}`
+                    })) || []
+                  }
+                }
+              };
+            });
+            
             commentData.push({
               commentId: comment.id || `comment_${i}`,
               author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
               created: comment.created,
-              tasks: commentResult.tasks,
+              tasks: enhancedTasksForJson,
               hasMedia: commentResult.tasks.some(task => task.media && task.media.length > 0),
               hasUIContext: commentResult.tasks.some(task => (task as EnhancedCommentTask).uiContext && (task as EnhancedCommentTask).uiContext!.searchQueries.length > 0)
             });
@@ -1553,7 +1614,25 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
               mediaSupport: includeMedia,
               imagesDownloaded: downloadImages,
               tasksWithMedia: tasksWithMedia.length,
-              tasksWithContext: tasksWithContext.length
+              tasksWithContext: tasksWithContext.length,
+              // Enhanced metadata for agent workflows
+              enhancedAnalysis: {
+                totalImages: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.downloadedImages?.length || 0), 0), 0),
+                totalSuccessfulDownloads: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.analysisMetadata?.successfulDownloads || 0), 0), 0),
+                totalImageSizeBytes: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.analysisMetadata?.totalImageBytes || 0), 0), 0),
+                ocrReadyTasks: commentData.reduce((total, c) => total + c.tasks.filter((t: EnhancedJsonTask) => t.analysisMetadata?.ocrReady).length, 0),
+                detectedPages: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.pages || [])))],
+                detectedComponents: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.components || [])))],
+                detectedActions: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.actions || [])))],
+                // Agent workflow suggestions
+                suggestedNextSteps: [
+                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.analysisMetadata?.ocrReady)) ? "Run OCR on downloaded images for text extraction" : null,
+                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.uiContext?.searchQueries.length)) ? "Use provided searchQueries for codebase component correlation" : null,
+                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.analysisMetadata?.componentAnalysisHints.i18nKeyPatterns.length)) ? "Use i18nKeyPatterns for localization key matching" : null,
+                  "Cross-reference detected UI elements with codebase components",
+                  "Generate automated i18n key mappings from extracted text"
+                ].filter(Boolean)
+              }
             },
             url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
           };
