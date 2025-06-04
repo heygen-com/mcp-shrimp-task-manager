@@ -9,6 +9,11 @@ import {
   parseCommentForTasks,
   formatCommentTasksAsMarkdown
 } from "../utils/jiraCommentTaskParser.js";
+import { 
+  jiraCommentService, 
+  JiraCommentCreateRequest, 
+  JiraCommentUpdateRequest 
+} from "./jira/jiraCommentService.js";
 
 // Basic JIRA Interfaces for improved type safety
 interface JiraUser {
@@ -148,8 +153,8 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history", "get_comment_tasks", "update_comment_task"]),
-  domain: z.enum(["ticket", "project", "component", "migration", "user"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history", "get_comment_tasks", "update_comment_task", "delete"]),
+  domain: z.enum(["ticket", "project", "component", "migration", "user", "TicketComment"]),
   context: z.object({
     projectKey: z.string().optional(),
     summary: z.string().optional(),
@@ -163,6 +168,28 @@ export const JiraToolSchema = z.object({
     userQuery: z.string().optional(), // Explicit field for user search query
     taskId: z.string().optional(), // For comment task operations
     completed: z.boolean().optional(), // For marking comment tasks complete
+    // Comment-specific fields
+    commentId: z.string().optional(), // For targeting specific comments
+    body: z.union([z.string(), z.record(z.any())]).optional(), // Comment body content
+    visibility: z.object({
+      type: z.enum(["group", "role"]),
+      value: z.string()
+    }).optional(), // Comment visibility restrictions
+    expand: z.array(z.string()).optional(), // Fields to expand in response
+    // Comment list/search fields
+    since: z.string().optional(), // ISO date string - comments since this time
+    until: z.string().optional(), // ISO date string - comments until this time
+    lastMinutes: z.number().optional(), // Comments from last X minutes
+    lastHours: z.number().optional(), // Comments from last X hours
+    lastDays: z.number().optional(), // Comments from last X days
+    authorAccountId: z.string().optional(), // Filter by author account ID
+    authorDisplayName: z.string().optional(), // Filter by author display name
+    authorEmail: z.string().optional(), // Filter by author email
+    textSearch: z.string().optional(), // Search within comment text
+    startAt: z.number().optional(), // Starting index for pagination
+    maxResults: z.number().optional(), // Maximum results to return
+    orderBy: z.enum(['created', '-created', 'updated', '-updated']).optional(), // Sort order
+    includeDeleted: z.boolean().optional(), // Include deleted comments
     // Add more fields as needed for extensibility
   }).passthrough(), // Allow other fields for specific actions if needed
   options: z.object({
@@ -807,6 +834,213 @@ export function formatChangelogToTimelineMarkdown(issueKey: string, changelog: J
 
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
   appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
+
+  // Handle TicketComment domain first to avoid type narrowing issues
+  if (input.domain === "TicketComment") {
+    const { issueKey, commentId, body, visibility, expand } = input.context;
+    
+    if (!issueKey) {
+      appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment): issueKey is required for all comment operations.");
+      return {
+        markdown: "❌ Error: issueKey is required for comment operations.",
+        json: { error: "issueKey is required" },
+      };
+    }
+
+    switch (input.action) {
+      case "create": {
+        if (!body) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment create): body is required.");
+          return {
+            markdown: "❌ Error: body is required to create a comment.",
+            json: { error: "body is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment create): Creating comment for issue: ${issueKey}`);
+        
+        const request: JiraCommentCreateRequest = {
+          body: body as string | AdfNode,
+          ...(visibility && { visibility })
+        };
+
+        const result = await jiraCommentService.createComment(issueKey, request);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
+          return {
+            markdown: `# ✅ Comment Created Successfully\n\n${markdown}`,
+            json: result.data,
+            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
+          };
+        } else {
+          return {
+            markdown: `❌ Error creating comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+
+      case "read": {
+        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment read): Reading comments for issue: ${issueKey}, commentId: ${commentId || 'all'}`);
+        
+        const result = await jiraCommentService.readComments(issueKey, commentId, expand);
+        
+        if (result.success) {
+          if (commentId && 'data' in result && result.data && !('comments' in result.data)) {
+            // Single comment - result.data is JiraComment
+            const comment = result.data as JiraComment;
+            const markdown = jiraCommentService.formatCommentForDisplay(comment);
+            return {
+              markdown: `# Comment from ${issueKey}\n\n${markdown}`,
+              json: comment,
+              url: jiraCommentService.getCommentUrl(issueKey, comment.id || "")
+            };
+          } else if ('data' in result && result.data && 'comments' in result.data) {
+            // Multiple comments - result.data has comments array
+            const commentsData = result.data as { comments: JiraComment[]; maxResults: number; total: number; startAt: number; };
+            let markdown = `# Comments from ${issueKey}\n\n`;
+            markdown += `**Total:** ${commentsData.total} comments\n\n`;
+            
+            commentsData.comments.forEach((comment) => {
+              markdown += jiraCommentService.formatCommentForDisplay(comment) + '\n---\n\n';
+            });
+            
+            return {
+              markdown,
+              json: commentsData,
+              url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+            };
+          }
+        }
+        
+        return {
+          markdown: `❌ Error reading comments: ${result.error}`,
+          json: { error: result.error, details: result.details }
+        };
+      }
+
+      case "update": {
+        if (!commentId) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment update): commentId is required.");
+          return {
+            markdown: "❌ Error: commentId is required to update a comment.",
+            json: { error: "commentId is required" },
+          };
+        }
+
+        if (!body) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment update): body is required.");
+          return {
+            markdown: "❌ Error: body is required to update a comment.",
+            json: { error: "body is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment update): Updating comment ${commentId} for issue: ${issueKey}`);
+        
+        const request: JiraCommentUpdateRequest = {
+          body: body as string | AdfNode,
+          ...(visibility && { visibility })
+        };
+
+        const result = await jiraCommentService.updateComment(issueKey, commentId, request);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
+          return {
+            markdown: `# ✅ Comment Updated Successfully\n\n${markdown}`,
+            json: result.data,
+            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
+          };
+        } else {
+          return {
+            markdown: `❌ Error updating comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+
+      case "delete": {
+        if (!commentId) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment delete): commentId is required.");
+          return {
+            markdown: "❌ Error: commentId is required to delete a comment.",
+            json: { error: "commentId is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment delete): Deleting comment ${commentId} from issue: ${issueKey}`);
+        
+        const result = await jiraCommentService.deleteComment(issueKey, commentId);
+        
+        if (result.success) {
+          return {
+            markdown: `# ✅ Comment Deleted Successfully\n\n**Issue:** ${issueKey}\n**Comment ID:** ${commentId}\n\nThe comment has been permanently removed from the JIRA issue.`,
+            json: { message: "Comment deleted successfully", issueKey, commentId },
+            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+          };
+        } else {
+          return {
+            markdown: `❌ Error deleting comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+
+      case "list": {
+        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment list): Listing comments for issue: ${issueKey} with filters`);
+        
+        const {
+          since, until, lastMinutes, lastHours, lastDays,
+          authorAccountId, authorDisplayName, authorEmail,
+          textSearch, startAt, maxResults, orderBy, expand, includeDeleted
+        } = input.context;
+        
+        const listRequest = {
+          ...(since && { since }),
+          ...(until && { until }),
+          ...(lastMinutes && { lastMinutes }),
+          ...(lastHours && { lastHours }),
+          ...(lastDays && { lastDays }),
+          ...(authorAccountId && { authorAccountId }),
+          ...(authorDisplayName && { authorDisplayName }),
+          ...(authorEmail && { authorEmail }),
+          ...(textSearch && { textSearch }),
+          ...(startAt !== undefined && { startAt }),
+          ...(maxResults && { maxResults }),
+          ...(orderBy && { orderBy }),
+          ...(expand && { expand }),
+          ...(includeDeleted && { includeDeleted })
+        };
+        
+        const result = await jiraCommentService.listComments(issueKey, listRequest);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentListForDisplay(result.data, issueKey);
+          return {
+            markdown,
+            json: result.data,
+            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+          };
+        } else {
+          return {
+            markdown: `❌ Error listing comments: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+
+      default:
+        appendJiraToolLog(`[ERROR] jiraToolHandler (TicketComment): Unsupported action '${input.action}' for TicketComment domain.`);
+        return {
+          markdown: `❌ Error: Action '${input.action}' is not supported for TicketComment domain. Supported actions: create, read, update, delete, list.`,
+          json: { error: "Unsupported action for TicketComment domain" }
+        };
+    }
+  }
+
+  // Handle other domains
   switch (input.action) {
     case "create":
       if (input.domain === "ticket") {
@@ -1103,7 +1337,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        appendJiraToolLog(`[ERROR] jiraToolHandler (find_user): Error searching for user '${userQuery}': ${errorMsg}`);
+        appendJiraToolLog(`[ERROR] jiraToolHandler (find_user): Error searching for JIRA user '${userQuery}': ${errorMsg}`);
         return {
           markdown: `❌ Error searching for JIRA user '${userQuery}': ${errorMsg}`,
           json: { error: errorMsg, query: userQuery },
@@ -1426,18 +1660,75 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           json: { error: "Invalid domain for update_comment_task" }
         };
       }
+    case "delete":
+      if (input.domain === "ticket") {
+        const { issueKey } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (delete): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for delete action.",
+            json: { error: "issueKey is required" },
+          };
+        }
+        
+        appendJiraToolLog(`[INFO] jiraToolHandler (delete): Deleting ticket: ${issueKey}`);
+        
+        try {
+          const { baseUrl, email, apiToken } = getJiraEnv();
+          const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+          const deleteUrl = `${baseUrl}/rest/api/3/issue/${issueKey}`;
+          
+          const deleteResponse = await fetch(deleteUrl, {
+            method: "DELETE",
+            headers: {
+              "Authorization": `Basic ${auth}`,
+            },
+          });
+          
+          if (!deleteResponse.ok) {
+            const errorText = await deleteResponse.text();
+            appendJiraToolLog(`[ERROR] jiraToolHandler (delete): JIRA API error deleting ${issueKey}: ${deleteResponse.status} ${errorText}`);
+            return {
+              markdown: `❌ Error deleting JIRA ticket ${issueKey}: ${deleteResponse.status} ${errorText}`,
+              json: { error: errorText, issueKey },
+            };
+          }
+          
+          appendJiraToolLog(`[SUCCESS] jiraToolHandler (delete): Successfully deleted ticket ${issueKey}`);
+          return {
+            markdown: `# ✅ JIRA Ticket ${issueKey} Deleted`,
+            json: { message: "Ticket deleted successfully", issueKey },
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (delete): Exception during ticket deletion: ${errorMsg}`);
+          return {
+            markdown: `❌ Error deleting JIRA ticket ${issueKey}: ${errorMsg}`,
+            json: { error: errorMsg, issueKey },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (delete): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: delete action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for delete action" }
+        };
+      }
     default:
       appendJiraToolLog(`[ERROR] jiraToolHandler: Unsupported action/domain: Action=${input.action}, Domain=${input.domain}`);
       return {
-        markdown: `❌ Error: The action '${input.action}' for domain '${input.domain}' is not supported or not implemented yet.`,
-        json: { error: "Unsupported action/domain combination", action: input.action, domain: input.domain },
+        markdown: `❌ Error: Unsupported action '${input.action}' for domain '${input.domain}'.`,
+        json: { error: "Unsupported action/domain combination" },
       };
   }
-  appendJiraToolLog(`[ERROR] jiraToolHandler: Reached end of switch without valid action for Action=${input.action}, Domain=${input.domain}`);
+
+  // Default error handler for unsupported combinations
+  appendJiraToolLog(`[ERROR] jiraToolHandler: Unhandled action/domain combination: Action=${input.action}, Domain=${input.domain}`);
   return {
-    markdown: `❌ Error: Invalid path or unhandled scenario for action '${input.action}', domain '${input.domain}'.`,
-    json: { error: "Invalid path or unhandled scenario", action: input.action, domain: input.domain },
-  }; 
+    markdown: `❌ Error: Unsupported action '${input.action}' for domain '${input.domain}'.`,
+    json: { error: "Unsupported action/domain combination" },
+  };
 }
 
 // Integration points:

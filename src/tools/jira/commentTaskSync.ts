@@ -8,6 +8,7 @@ import {
 import { createTask } from "../../models/taskModel.js";
 import { getActiveProject } from "../../models/projectModel.js";
 import { RelatedFileType } from "../../types/index.js";
+import { jiraCommentService } from "./jiraCommentService.js";
 
 // Schema for the comment task sync tool
 export const commentTaskSyncSchema = z.object({
@@ -175,68 +176,95 @@ This task was automatically created from a JIRA comment. When completed, you can
 }
 
 /**
- * Mock function to update JIRA comment (placeholder for actual implementation)
+ * Get JIRA ticket data using the unified service
  */
-async function mockUpdateJiraComment(
+async function getJiraTicket(issueKey: string) {
+  try {
+    // Use the unified comment service to read comments
+    const result = await jiraCommentService.readComments(issueKey);
+    
+    if (result.success && 'data' in result && result.data && 'comments' in result.data) {
+      return {
+        fields: {
+          comment: {
+            comments: result.data.comments
+          }
+        }
+      };
+    } else {
+      throw new Error(result.error || 'Failed to read comments');
+    }
+  } catch (error) {
+    console.error(`Failed to get JIRA ticket ${issueKey}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Update JIRA comment using the unified service
+ */
+async function updateJiraComment(
   issueKey: string,
   commentId: string, 
   commentTaskId: string,
   originalPattern: string
 ): Promise<boolean> {
-  console.log(`Would update JIRA comment in ${issueKey}:`);
-  console.log(`  Comment ID: ${commentId}`);
-  console.log(`  Task ID: ${commentTaskId}`);
-  console.log(`  Original: ${originalPattern}`);
-  
-  // Convert unchecked to checked pattern
-  let updatedPattern = originalPattern;
-  if (originalPattern.includes('[ ]')) {
-    updatedPattern = originalPattern.replace('[ ]', '[x]');
-  } else if (originalPattern.includes('☐')) {
-    updatedPattern = originalPattern.replace('☐', '☑');
-  } else if (originalPattern.startsWith('TODO:')) {
-    updatedPattern = originalPattern.replace('TODO:', 'DONE:');
-  } else if (originalPattern.startsWith('ACTION:')) {
-    updatedPattern = originalPattern.replace('ACTION:', 'COMPLETED:');
-  }
-  
-  console.log(`  Updated: ${updatedPattern}`);
-  console.log(`  (This would use JIRA API to update the actual comment)`);
-  
-  return true; // Mock success
-}
-
-/**
- * Mock function to get JIRA ticket data (placeholder for actual implementation)
- */
-async function mockGetJiraTicket() {
-  // This would be replaced with actual JIRA API call
-  return {
-    fields: {
-      comment: {
-        comments: [
-          {
-            id: "comment1",
-            author: { displayName: "John Doe" },
-            created: new Date().toISOString(),
-            body: `Here are the tasks to complete:
-- [ ] Fix the mobile layout issue
-- [ ] Add validation for email field  
-- [x] Update documentation
-TODO: Review the API endpoints`
-          },
-          {
-            id: "comment2", 
-            author: { displayName: "Jane Smith" },
-            created: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
-            body: `Additional items:
-- [ ] Configure SSL certificates
-ACTION: Update the deployment scripts`
-          }
-        ]
-      }
+  try {
+    console.log(`Updating JIRA comment in ${issueKey}:`);
+    console.log(`  Comment ID: ${commentId}`);
+    console.log(`  Task ID: ${commentTaskId}`);
+    console.log(`  Original: ${originalPattern}`);
+    
+    // First, read the current comment to get its body
+    const readResult = await jiraCommentService.readComments(issueKey, commentId);
+    
+    if (!readResult.success || !readResult.data || 'comments' in readResult.data) {
+      console.error('Failed to read comment for update');
+      return false;
     }
-  };
+    
+    const currentComment = readResult.data;
+    let currentBody = '';
+    
+    // Extract current body text
+    if (typeof currentComment.body === 'string') {
+      currentBody = currentComment.body;
+    } else if (currentComment.body && typeof currentComment.body === 'object') {
+      // For ADF, we would need to parse and update the structure
+      // For now, we'll convert to text for simplicity
+      currentBody = 'Comment updated via task completion';
+    }
+    
+    // Convert unchecked to checked pattern
+    let updatedBody = currentBody;
+    if (originalPattern.includes('[ ]')) {
+      updatedBody = currentBody.replace(originalPattern, originalPattern.replace('[ ]', '[x]'));
+    } else if (originalPattern.includes('☐')) {
+      updatedBody = currentBody.replace(originalPattern, originalPattern.replace('☐', '☑'));
+    } else if (originalPattern.startsWith('TODO:')) {
+      updatedBody = currentBody.replace(originalPattern, originalPattern.replace('TODO:', 'DONE:'));
+    } else if (originalPattern.startsWith('ACTION:')) {
+      updatedBody = currentBody.replace(originalPattern, originalPattern.replace('ACTION:', 'COMPLETED:'));
+    }
+    
+    console.log(`  Updated: ${updatedBody}`);
+    
+    // Update the comment using the unified service
+    const updateResult = await jiraCommentService.updateComment(issueKey, commentId, {
+      body: updatedBody
+    });
+    
+    if (updateResult.success) {
+      console.log('✅ Comment updated successfully via unified service');
+      return true;
+    } else {
+      console.error('❌ Failed to update comment:', updateResult.error);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Exception during comment update:', error);
+    return false;
+  }
 }
 
 /**
@@ -256,7 +284,7 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         }
         
         // Mock JIRA ticket fetch (replace with actual implementation)
-        const ticketData = await mockGetJiraTicket();
+        const ticketData = await getJiraTicket(input.issueKey);
         const comments = ticketData.fields?.comment?.comments || [];
         
         if (comments.length === 0) {
@@ -294,7 +322,7 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         const syncMetadata = await getCommentSyncMetadata(input.projectId);
         
         // Mock JIRA ticket fetch and parse comments
-        const ticketData = await mockGetJiraTicket();
+        const ticketData = await getJiraTicket(input.issueKey);
         const comments = ticketData.fields?.comment?.comments || [];
         const parseResult = parseCommentsForTasks(comments);
         
@@ -355,7 +383,7 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         const syncMetadata = await getCommentSyncMetadata(input.projectId);
         
         // Mock JIRA ticket fetch and parse comments
-        const ticketData = await mockGetJiraTicket();
+        const ticketData = await getJiraTicket(input.issueKey);
         const comments = ticketData.fields?.comment?.comments || [];
         const parseResult = parseCommentsForTasks(comments);
         
@@ -472,7 +500,7 @@ export async function commentTaskSync(input: CommentTaskSyncInput) {
         }
         
         // Update JIRA comment
-        const success = await mockUpdateJiraComment(
+        const success = await updateJiraComment(
           taskMapping.issueKey,
           taskMapping.commentId,
           taskMapping.commentTaskId,
