@@ -4,6 +4,11 @@ import fetch from "node-fetch";
 import fs from "fs/promises";
 import fsSync from 'fs';
 import path from "path";
+import { 
+  parseCommentsForTasks, 
+  parseCommentForTasks,
+  formatCommentTasksAsMarkdown
+} from "../utils/jiraCommentTaskParser.js";
 
 // Basic JIRA Interfaces for improved type safety
 interface JiraUser {
@@ -20,11 +25,17 @@ interface AdfNode {
   type: string;
   text?: string;
   content?: AdfNode[];
+  attrs?: {
+    state?: string;
+    localId?: string;
+    [key: string]: unknown;
+  };
   // attrs?: any; // Could be further specified if needed
   // marks?: any[]; // Could be further specified if needed
 }
 
 interface JiraComment {
+  id?: string;
   author?: JiraUser;
   body?: AdfNode | string; // ADF or string
   created: string;
@@ -137,7 +148,7 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history", "get_comment_tasks", "update_comment_task"]),
   domain: z.enum(["ticket", "project", "component", "migration", "user"]),
   context: z.object({
     projectKey: z.string().optional(),
@@ -150,6 +161,8 @@ export const JiraToolSchema = z.object({
     assigneeAccountId: z.string().optional(), // For assigning tickets
     assignee: z.string().optional(), // For providing username/email for assignment lookup
     userQuery: z.string().optional(), // Explicit field for user search query
+    taskId: z.string().optional(), // For comment task operations
+    completed: z.boolean().optional(), // For marking comment tasks complete
     // Add more fields as needed for extensibility
   }).passthrough(), // Allow other fields for specific actions if needed
   options: z.object({
@@ -1130,6 +1143,287 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         return {
           markdown: `❌ Error: history action is only valid for the 'ticket' domain.`, 
           json: { error: "Invalid domain for history action" }
+        };
+      }
+    case "get_comment_tasks":
+      if (input.domain === "ticket") {
+        const issueKey = input.context.issueKey;
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (get_comment_tasks): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for get_comment_tasks action.",
+            json: { error: "issueKey is required" },
+          };
+        }
+        
+        appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Fetching comment tasks for issue: ${issueKey}`);
+        try {
+          // Get full ticket data including comments
+          const ticketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
+          const comments = ticketData.fields?.comment?.comments || [];
+          
+          if (comments.length === 0) {
+            return {
+              markdown: `# No Comments Found\n\nJIRA ticket ${issueKey} has no comments to scan for tasks.`,
+              json: { comments: [], totalTasks: 0 },
+              url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+            };
+          }
+          
+          // Parse all comments for tasks
+          const parseResult = parseCommentsForTasks(comments);
+          const markdown = formatCommentTasksAsMarkdown(parseResult);
+          
+          // Organize by comment for easy agent consumption
+          const commentData = comments.map((comment, index) => {
+            const commentResult = parseCommentForTasks(comment, index);
+            return {
+              commentId: comment.id || `comment_${index}`,
+              author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
+              created: comment.created,
+              tasks: commentResult.tasks
+            };
+          }).filter(c => c.tasks.length > 0);
+          
+          return {
+            markdown: `# Comment Tasks for ${issueKey}\n\n${markdown}`,
+            json: {
+              issueKey,
+              comments: commentData,
+              totalTasks: parseResult.totalTasks,
+              pendingTasks: parseResult.pendingTasks,
+              completedTasks: parseResult.completedTasks
+            },
+            url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (get_comment_tasks): Failed to fetch comment tasks for ${issueKey}: ${errorMsg}`);
+          return {
+            markdown: `❌ Error fetching comment tasks for JIRA ticket ${issueKey}: ${errorMsg}`,
+            json: { error: errorMsg, issueKey },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (get_comment_tasks): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: get_comment_tasks action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for get_comment_tasks" }
+        };
+      }
+      
+    case "update_comment_task":
+      if (input.domain === "ticket") {
+        const { issueKey, taskId, completed } = input.context;
+        
+        if (!issueKey || !taskId || completed === undefined) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (update_comment_task): issueKey, taskId, and completed are required.");
+          return {
+            markdown: "❌ Error: issueKey, taskId, and completed are required for update_comment_task action.",
+            json: { error: "Missing required parameters" },
+          };
+        }
+        
+        appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Starting task update - taskId: ${taskId}, issue: ${issueKey}, completed: ${completed}`);
+        
+        try {
+          const taskIdStr = taskId as string;
+          
+          // Check if it looks like a raw JIRA localId (UUID format)
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskIdStr)) {
+            appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Processing ADF taskItem with localId: ${taskIdStr}`);
+            
+            // Step 1: Get the full ticket with comments to find the taskItem
+            const ticketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
+            const comments = ticketData.fields?.comment?.comments || [];
+            appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Found ${comments.length} comments to search`);
+            
+            let targetComment: JiraComment | null = null;
+            let taskItemFound = false;
+            
+            // Step 2: Search through comments to find the one containing this taskItem
+            for (const comment of comments) {
+              if (comment.body && typeof comment.body === 'object' && comment.body.type === 'doc') {
+                // Recursively search ADF structure for taskItem with matching localId
+                function findTaskItem(node: AdfNode): boolean {
+                  if (node.type === 'taskItem' && node.attrs?.localId === taskIdStr) {
+                    return true;
+                  }
+                  if (node.content) {
+                    return node.content.some(findTaskItem);
+                  }
+                  return false;
+                }
+                
+                if (findTaskItem(comment.body as AdfNode)) {
+                  targetComment = comment;
+                  taskItemFound = true;
+                  appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Found taskItem in comment ${comment.id}`);
+                  break;
+                }
+              }
+            }
+            
+            if (!taskItemFound || !targetComment) {
+              appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): TaskItem with localId ${taskIdStr} not found in any comment`);
+              return {
+                markdown: `❌ Error: TaskItem with ID ${taskIdStr} not found in ticket ${issueKey} comments.`,
+                json: { error: "TaskItem not found", taskId: taskIdStr, issueKey },
+                url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+              };
+            }
+            
+            // Step 3: Clone and update the comment's ADF structure
+            const updatedBody = JSON.parse(JSON.stringify(targetComment.body));
+            let updateCount = 0;
+            
+            function updateTaskItem(node: AdfNode): void {
+              if (node.type === 'taskItem' && node.attrs?.localId === taskIdStr) {
+                node.attrs.state = completed ? 'DONE' : 'TODO';
+                updateCount++;
+                appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Updated taskItem ${taskIdStr} state to ${node.attrs.state}`);
+              }
+              if (node.content) {
+                node.content.forEach(updateTaskItem);
+              }
+            }
+            
+            updateTaskItem(updatedBody);
+            
+            if (updateCount === 0) {
+              appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): Failed to update taskItem in cloned structure`);
+              return {
+                markdown: `❌ Error: Failed to update taskItem ${taskIdStr} in comment structure.`,
+                json: { error: "Failed to update taskItem", taskId: taskIdStr },
+              };
+            }
+            
+            // Step 4: Update the comment via JIRA API
+            const { baseUrl, email, apiToken } = getJiraEnv();
+            const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+            const updateUrl = `${baseUrl}/rest/api/3/issue/${issueKey}/comment/${targetComment.id}`;
+            
+            appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Updating comment ${targetComment.id} via API`);
+            
+            const updatePayload = {
+              body: updatedBody
+            };
+            
+            const response = await fetch(updateUrl, {
+              method: "PUT",
+              headers: {
+                "Authorization": `Basic ${auth}`,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(updatePayload),
+            });
+            
+            if (!response.ok) {
+              const errorText = await response.text();
+              appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): JIRA API error ${response.status}: ${errorText}`);
+              return {
+                markdown: `❌ Error updating JIRA comment: ${response.status} ${errorText}`,
+                json: { error: `JIRA API error: ${response.status}`, details: errorText },
+              };
+            }
+            
+            appendJiraToolLog(`[SUCCESS] jiraToolHandler (update_comment_task): Successfully updated taskItem ${taskIdStr} to ${completed ? 'DONE' : 'TODO'}`);
+            
+            return {
+              markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${targetComment.id}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
+              json: {
+                issueKey,
+                taskId: taskIdStr,
+                completed,
+                commentId: targetComment.id,
+                updated: true,
+                method: "ADF taskItem API update",
+                newState: completed ? 'DONE' : 'TODO'
+              },
+              url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+            };
+          }
+          // Handle our generated task ID formats (existing logic for ct_ and adf_ prefixes)
+          else {
+            appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Processing non-UUID task ID format: ${taskIdStr}`);
+            
+            // Enhanced task ID parsing for our generated formats
+            let updateMethod = '';
+            let taskInfo: { commentId?: string; localId?: string; lineNumber?: string; type: string } = { type: "Unknown" };
+            let isAdfTask = false;
+            
+            // Check if it's our generated ADF task ID: adf_{commentId}_{localId}
+            if (taskIdStr.startsWith('adf_')) {
+              const parts = taskIdStr.split('_');
+              if (parts.length >= 3) {
+                const commentId = parts[1];
+                const localId = parts.slice(2).join('_'); // Handle localIds with underscores
+                updateMethod = "Update ADF taskItem via JIRA API";
+                taskInfo = { commentId, localId, type: "ADF taskItem" };
+                isAdfTask = true;
+              }
+            }
+            // Check if it's our generated text task ID: ct_{commentId}_{line}_{hash}
+            else if (taskIdStr.startsWith('ct_')) {
+              const parts = taskIdStr.split('_');
+              if (parts.length >= 4) {
+                const commentId = parts[1];
+                const lineNumber = parts[2];
+                updateMethod = "Update comment text via JIRA API";
+                taskInfo = { commentId, lineNumber, type: "Text-based task" };
+              }
+            }
+            // Fallback: treat as unknown format
+            else {
+              updateMethod = "Unknown task ID format";
+              taskInfo = { type: "Unknown task format" };
+            }
+            
+            appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Parsed task format - Method: ${updateMethod}, Type: ${taskInfo.type}`);
+            
+            // For now, return guidance for these formats (could implement text-based updates later)
+            const guidanceText = isAdfTask ? 
+              (taskInfo.commentId ? 
+                `This ADF task would be updated using JIRA's taskItem API with localId: ${taskInfo.localId} in comment: ${taskInfo.commentId}` :
+                `This ADF task would be updated using JIRA's taskItem API with localId: ${taskInfo.localId}. Comment ID needs to be located via ticket scan.`
+              ) :
+              (taskInfo.lineNumber ? 
+                `This text-based task would be updated by modifying comment ${taskInfo.commentId} at line ${taskInfo.lineNumber}` :
+                `Task format not recognized. Expected format: adf_{commentId}_{localId} or ct_{commentId}_{line}_{hash}`
+              );
+            
+            return {
+              markdown: `# 📋 Comment Task Update Request\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskId}\n**Status:** ${completed ? 'Mark Completed' : 'Mark Pending'}\n**Method:** ${updateMethod}\n\n${guidanceText}\n\n**Next Steps:**\n${isAdfTask ? 
+                '- Locate the comment containing this task\n- Use JIRA API to update taskItem state to ' + (completed ? 'DONE' : 'TODO') :
+                '- Parse comment text to find and update checkbox\n- Update comment via JIRA API'
+              }\n\n*Note: This format requires additional implementation for full automation.*`,
+              json: {
+                issueKey,
+                taskId, 
+                completed,
+                updateMethod,
+                taskInfo,
+                isAdfTask,
+                updated: false,
+                message: "Non-UUID task format - additional implementation needed"
+              },
+              url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+            };
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): Exception during task update: ${errorMsg}`);
+          return {
+            markdown: `❌ Error updating comment task: ${errorMsg}`,
+            json: { error: errorMsg, issueKey, taskId },
+          };
+        }
+      } else {
+        appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): Invalid domain '${input.domain}'. Must be 'ticket'.`);
+        return {
+          markdown: `❌ Error: update_comment_task action is only valid for the 'ticket' domain.`, 
+          json: { error: "Invalid domain for update_comment_task" }
         };
       }
     default:
