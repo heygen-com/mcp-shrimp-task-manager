@@ -108,6 +108,7 @@ import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
 import { JiraToolSchema, jiraToolHandler } from "./tools/jiraTools.js";
 import { researchMode, researchModeSchema } from './tools/research/researchMode.js';
+import { recordToolUsage, ToolCallParams } from './utils/toolUsageTracker.js';
 
 async function main() {
   try {
@@ -382,6 +383,25 @@ async function main() {
       };
     });
 
+    // Helper function to extract tracking parameters from parsed arguments
+    function buildTrackingParams(toolName: string, parsedArgs: unknown): ToolCallParams {
+      const params: ToolCallParams = {};
+      const args = parsedArgs as Record<string, unknown>;
+      
+      // Extract relevant parameters based on tool name patterns
+      if (args.action) params.action = args.action as string;
+      if (args.domain) params.domain = args.domain as string;
+      if (args.status) params.status = args.status as string;
+      if (args.updateMode) params.updateMode = args.updateMode as string;
+      if (args.isId !== undefined) params.isId = args.isId as boolean;
+      if (args.stage) params.stage = args.stage as string;
+      if (args.analysisType) params.analysisType = args.analysisType as string;
+      if (args.operation) params.operation = args.operation as string;
+      if (args.state) params.checkpointState = args.state as string;
+      
+      return params;
+    }
+
     // Restore setRequestHandler for CallTool
     server.setRequestHandler(
       CallToolRequestSchema,
@@ -399,115 +419,143 @@ async function main() {
           switch (toolName) {
             case "plan_task":
               parsedArgs = await planTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await planTask(parsedArgs);
               break;
             case "analyze_task":
               parsedArgs = await analyzeTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await analyzeTask(parsedArgs);
               break;
             case "reflect_task":
               parsedArgs = await reflectTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await reflectTask(parsedArgs);
               break;
             case "split_tasks":
               parsedArgs = await splitTasksSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await splitTasks(parsedArgs);
               break;
             case "list_tasks":
               parsedArgs = await listTasksSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await listTasks(parsedArgs);
               break;
             case "execute_task":
               parsedArgs = await executeTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await executeTask(parsedArgs);
               break;
             case "verify_task":
               parsedArgs = await verifyTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await verifyTask(parsedArgs);
               break;
             case "report_task_result":
               parsedArgs = await reportTaskResultSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await reportTaskResult(parsedArgs);
               break;
             case "complete_task":
               parsedArgs = await completeTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await completeTask(parsedArgs);
               break;
             case "delete_task":
               parsedArgs = await deleteTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await deleteTask(parsedArgs);
               break;
             case "clear_all_tasks":
               parsedArgs = await clearAllTasksSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await clearAllTasks(parsedArgs);
               break;
             case "update_task":
               parsedArgs = await updateTaskContentSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await updateTaskContent(parsedArgs);
               break;
             case "query_task":
               parsedArgs = await queryTaskSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await queryTask(parsedArgs);
               break;
             case "get_task_detail":
               parsedArgs = await getTaskDetailSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await getTaskDetail(parsedArgs);
               break;
             case "process_thought":
               parsedArgs = await processThoughtSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await processThought(parsedArgs);
               break;
             case "init_project_rules":
               parsedArgs = await initProjectRulesSchema.parseAsync(request.params.arguments || {});
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await initProjectRules();
               break;
             case "project":
               parsedArgs = await projectSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await project(parsedArgs);
               break;
             case "project_context":
               parsedArgs = await projectContextSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await projectContext(parsedArgs);
               break;
             case "memories":
               parsedArgs = await memorySchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await memories(parsedArgs);
               break;
             case "log_data_dir":
               await logDataDirSchema.parseAsync(request.params.arguments || {});
+              await recordToolUsage(toolName, {});
               result = await logDataDir();
               break;
             case "consult_expert":
               parsedArgs = await ConsultExpertInputSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await consultExpert(parsedArgs);
               // Logging of result snippet removed for clarity, as 'result' is now an object
               break;
             case "check_agent_status":
               parsedArgs = await checkAgentStatusSchema.parseAsync(request.params.arguments || {}); 
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await checkAgentStatus();
               break;  
             case "browser":
               parsedArgs = await browserSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await browser(parsedArgs);
               break;
             case "checkpoint":
               parsedArgs = await checkpointSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await checkpoint(parsedArgs);
               break;
             case "pull_request":
               parsedArgs = await pullRequestSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await pullRequest(parsedArgs);
               break;
             case "check_env":
               await checkEnvSchema.parseAsync(request.params.arguments || {});
+              await recordToolUsage(toolName, {});
               result = await checkEnv();
               break;
             case "architecture_snapshot":
               parsedArgs = await architectureSnapshotSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await architectureSnapshot(parsedArgs);
               break;
             case "jira": {
               parsedArgs = await JiraToolSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               const jiraResult = await jiraToolHandler(parsedArgs);
               const contentItems = [];
               if (jiraResult.markdown) {
@@ -530,6 +578,7 @@ async function main() {
             }
             case "research_mode": {
               parsedArgs = await researchModeSchema.parseAsync(request.params.arguments);
+              await recordToolUsage(toolName, buildTrackingParams(toolName, parsedArgs));
               result = await researchMode(parsedArgs);
               break;
             }
