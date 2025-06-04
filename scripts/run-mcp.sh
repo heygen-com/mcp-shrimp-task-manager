@@ -48,5 +48,7 @@ fi
 echo "Starting MCP server..." >> "$LOG_FILE"
 echo "Command: node $INDEX_PATH" >> "$LOG_FILE"
 
-# Run the MCP server and log output
-exec node "$INDEX_PATH" 2>&1 | tee -a "$LOG_FILE" 
+# Run the MCP server.
+# Pipe stdout directly to the client (MCP controller).
+# Pipe stderr to the log file for startup/debug messages.
+exec node "$INDEX_PATH" 2>> "$LOG_FILE" 

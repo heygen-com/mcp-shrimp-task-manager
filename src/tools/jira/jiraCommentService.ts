@@ -352,17 +352,15 @@ function extractTextFromAdf(node: AdfNode): string {
  * JIRA Comment Service - Unified CRUD operations for JIRA comments
  */
 export class JiraCommentService {
-  private baseUrl: string;
-  private email: string;
-  private apiToken: string;
-  private auth: string;
-
   constructor() {
+    // Constructor is now empty or can be used for non-credential related setup
+  }
+
+  private _getAuthDetails() {
+    // This method will now fetch credentials on demand
     const { baseUrl, email, apiToken } = getJiraEnv();
-    this.baseUrl = baseUrl;
-    this.email = email;
-    this.apiToken = apiToken;
-    this.auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+    const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+    return { baseUrl, auth };
   }
 
   /**
@@ -371,10 +369,10 @@ export class JiraCommentService {
   async createComment(issueKey: string, request: JiraCommentCreateRequest): Promise<JiraCommentResponse> {
     try {
       CreateCommentSchema.parse({ issueKey, ...request });
+      const { baseUrl, auth } = this._getAuthDetails(); // Lazy load credentials
       
-      const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment`;
+      const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment`;
       
-      // Convert plain text to ADF if needed, with smart task list detection
       let body = request.body;
       if (typeof body === "string") {
         const taskParseResult = parseTextForTasks(body);
@@ -393,7 +391,7 @@ export class JiraCommentService {
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          "Authorization": `Basic ${this.auth}`,
+          "Authorization": `Basic ${auth}`,
           "Accept": "application/json",
           "Content-Type": "application/json",
         },
@@ -442,16 +440,16 @@ export class JiraCommentService {
   async readComments(issueKey: string, commentId?: string, expand?: string[]): Promise<JiraCommentResponse | JiraCommentsListResponse> {
     try {
       ReadCommentSchema.parse({ issueKey, commentId, expand });
+      const { baseUrl, auth } = this._getAuthDetails(); // Lazy load credentials
       
       if (commentId) {
-        // Read specific comment
-        const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
+        const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
         const expandParam = expand ? `?expand=${expand.join(',')}` : '';
         
         const response = await fetch(`${url}${expandParam}`, {
           method: "GET",
           headers: {
-            "Authorization": `Basic ${this.auth}`,
+            "Authorization": `Basic ${auth}`,
             "Accept": "application/json",
           },
         });
@@ -471,14 +469,13 @@ export class JiraCommentService {
           data
         };
       } else {
-        // Read all comments
-        const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment`;
+        const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment`;
         const expandParam = expand ? `?expand=${expand.join(',')}` : '';
         
         const response = await fetch(`${url}${expandParam}`, {
           method: "GET",
           headers: {
-            "Authorization": `Basic ${this.auth}`,
+            "Authorization": `Basic ${auth}`,
             "Accept": "application/json",
           },
         });
@@ -518,10 +515,10 @@ export class JiraCommentService {
   async updateComment(issueKey: string, commentId: string, request: JiraCommentUpdateRequest): Promise<JiraCommentResponse> {
     try {
       UpdateCommentSchema.parse({ issueKey, commentId, ...request });
+      const { baseUrl, auth } = this._getAuthDetails(); // Lazy load credentials
       
-      const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
+      const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
       
-      // Convert plain text to ADF if needed
       let body = request.body;
       if (typeof body === "string") {
         body = toADF(body);
@@ -535,7 +532,7 @@ export class JiraCommentService {
       const response = await fetch(url, {
         method: "PUT",
         headers: {
-          "Authorization": `Basic ${this.auth}`,
+          "Authorization": `Basic ${auth}`,
           "Accept": "application/json",
           "Content-Type": "application/json",
         },
@@ -570,13 +567,14 @@ export class JiraCommentService {
   async deleteComment(issueKey: string, commentId: string): Promise<JiraCommentResponse> {
     try {
       DeleteCommentSchema.parse({ issueKey, commentId });
+      const { baseUrl, auth } = this._getAuthDetails(); // Lazy load credentials
       
-      const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
+      const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
       
       const response = await fetch(url, {
         method: "DELETE",
         headers: {
-          "Authorization": `Basic ${this.auth}`,
+          "Authorization": `Basic ${auth}`,
           "Accept": "application/json",
         },
       });
@@ -644,7 +642,8 @@ export class JiraCommentService {
    * Helper method to get comment URL
    */
   getCommentUrl(issueKey: string, commentId: string): string {
-    return `${this.baseUrl}/browse/${issueKey}?focusedCommentId=${commentId}`;
+    const { baseUrl } = this._getAuthDetails(); 
+    return `${baseUrl}/browse/${issueKey}?focusedCommentId=${commentId}`;
   }
 
   /**
@@ -653,15 +652,14 @@ export class JiraCommentService {
   async listComments(issueKey: string, request: JiraCommentListRequest = {}): Promise<JiraCommentListResponse> {
     try {
       ListCommentsSchema.parse({ issueKey, ...request });
+      const { baseUrl, auth } = this._getAuthDetails(); // Lazy load credentials
       
-      // Prepare API parameters
       const startAt = request.startAt || 0;
       const maxResults = Math.min(request.maxResults || 50, 1000);
       const orderBy = request.orderBy || 'created';
       const expand = request.expand ? request.expand.join(',') : '';
       
-      // Build URL with query parameters
-      const url = `${this.baseUrl}/rest/api/3/issue/${issueKey}/comment`;
+      const url = `${baseUrl}/rest/api/3/issue/${issueKey}/comment`;
       const params = new URLSearchParams({
         startAt: startAt.toString(),
         maxResults: maxResults.toString(),
@@ -672,7 +670,7 @@ export class JiraCommentService {
       const response = await fetch(`${url}?${params}`, {
         method: "GET",
         headers: {
-          "Authorization": `Basic ${this.auth}`,
+          "Authorization": `Basic ${auth}`,
           "Accept": "application/json",
         },
       });
@@ -693,12 +691,10 @@ export class JiraCommentService {
         startAt: number;
       };
       
-      // Apply client-side filters
       let filteredComments = [...data.comments];
       const appliedFilters: string[] = [];
       const timeRange: { since?: string; until?: string; } = {};
       
-      // Time-based filtering
       if (request.lastMinutes) {
         const cutoff = new Date(Date.now() - request.lastMinutes * 60 * 1000);
         filteredComments = filteredComments.filter(comment => 
@@ -721,7 +717,6 @@ export class JiraCommentService {
         appliedFilters.push(`Last ${request.lastDays} days`);
         timeRange.since = cutoff.toISOString();
       } else {
-        // Custom date range
         if (request.since) {
           const sinceDate = new Date(request.since);
           filteredComments = filteredComments.filter(comment => 
@@ -741,7 +736,6 @@ export class JiraCommentService {
         }
       }
       
-      // Author filtering
       let authorFilter: string | undefined;
       if (request.authorAccountId) {
         filteredComments = filteredComments.filter(comment => 
@@ -764,7 +758,6 @@ export class JiraCommentService {
         authorFilter = request.authorEmail;
       }
       
-      // Text search filtering
       let textSearchFilter: string | undefined;
       if (request.textSearch) {
         const searchText = request.textSearch.toLowerCase();

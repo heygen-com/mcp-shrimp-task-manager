@@ -132,12 +132,17 @@ function getInitialState(): GlobalAgentState {
     'architecture_snapshot_update', 'architecture_snapshot_compare', 'architecture_snapshot_list',
     'jira_ticket_create', 'jira_ticket_update', 'jira_ticket_find', 'jira_ticket_list',
     'jira_ticket_sync', 'jira_ticket_verify_credentials',
+    'jira_ticket_read', 'jira_ticket_history', 'jira_ticket_get_comment_tasks', 
+    'jira_ticket_update_comment_task', 'jira_ticket_delete',
     'jira_project_create', 'jira_project_update', 'jira_project_find', 'jira_project_list',
     'jira_project_sync', 'jira_project_verify_credentials',
     'jira_component_create', 'jira_component_update', 'jira_component_find', 'jira_component_list',
     'jira_component_sync', 'jira_component_verify_credentials',
     'jira_migration_create', 'jira_migration_update', 'jira_migration_find', 'jira_migration_list',
     'jira_migration_sync', 'jira_migration_verify_credentials',
+    'jira_user_find_user',
+    'jira_ticket_create_comment', 'jira_ticket_read_comments', 'jira_ticket_update_comment', 
+    'jira_ticket_delete_comment', 'jira_ticket_list_comments',
     'research_mode'
   ];
   const initialState: GlobalAgentState = {};

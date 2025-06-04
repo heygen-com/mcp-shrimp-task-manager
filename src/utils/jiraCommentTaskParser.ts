@@ -1,3 +1,17 @@
+import fsSync from 'fs';
+
+const jiraToolLogPath = '/tmp/mcp_shrimp_jira_tool.log';
+
+function appendJiraCommentLog(message: string) {
+  const timestamp = new Date().toISOString();
+  try {
+    fsSync.appendFileSync(jiraToolLogPath, `${timestamp}: ${message}\n`);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } catch (_err) {
+    // Can't console.log error here, it might break stdio
+  }
+}
+
 // Define interfaces for JIRA comment structures
 interface JiraComment {
   id?: string;
@@ -17,8 +31,37 @@ interface AdfNode {
   attrs?: {
     state?: string;
     localId?: string;
+    url?: string;        // For media/image nodes
+    id?: string;         // For media/attachment IDs
+    alt?: string;        // Alt text for images
+    width?: number;      // Image dimensions
+    height?: number;
+    collection?: string; // Media collection
+    occurrenceKey?: string; // Media occurrence key
     [key: string]: unknown;
   };
+  marks?: Array<{
+    type: string;
+    attrs?: {
+      href?: string;     // For links
+      [key: string]: unknown;
+    };
+  }>;
+}
+
+// Interface for extracted media/images from comments
+interface CommentMedia {
+  type: 'image' | 'attachment' | 'embed';
+  url?: string;
+  id?: string;
+  alt?: string;
+  filename?: string;
+  width?: number;
+  height?: number;
+  collection?: string;  // Media collection
+  description?: string;
+  downloadUrl?: string;  // Authenticated download URL
+  [key: string]: unknown; // Allow additional properties like base64Data
 }
 
 export interface CommentTask {
@@ -30,6 +73,8 @@ export interface CommentTask {
   author: string; // Who created the comment
   originalPattern: string; // Original text pattern that was detected
   lineNumber?: number; // Which line in the comment this task was found
+  media?: CommentMedia[]; // Associated images/attachments
+  contextText?: string; // Surrounding text for context
 }
 
 export interface CommentTaskParseResult {
@@ -60,12 +105,16 @@ const TASK_PATTERNS = [
  * Extract text content from JIRA comment body (handles both string and ADF format)
  */
 export function extractCommentText(commentBody: string | AdfNode | undefined): string {
+  appendJiraCommentLog(`[DEBUG] extractCommentText: Processing commentBody type: ${typeof commentBody}`);
+  
   if (typeof commentBody === 'string') {
+    appendJiraCommentLog(`[DEBUG] extractCommentText: String format, length: ${commentBody.length}, content: "${commentBody.substring(0, 100)}..."`);
     return commentBody;
   }
   
   // Handle ADF (Atlassian Document Format)
   if (commentBody?.type === 'doc' && commentBody?.content) {
+    appendJiraCommentLog(`[DEBUG] extractCommentText: ADF format detected, content array length: ${commentBody.content.length}`);
     let text = '';
     
     function extractTextRecursive(node: AdfNode) {
@@ -79,6 +128,8 @@ export function extractCommentText(commentBody: string | AdfNode | undefined): s
         const localId = node.attrs?.localId || '';
         const isCompleted = state === 'DONE';
         const checkbox = isCompleted ? '[x]' : '[ ]';
+        
+        appendJiraCommentLog(`[DEBUG] extractCommentText: Found ADF taskItem - localId: ${localId}, state: ${state}`);
         
         // Add the task as a checkbox format that our parser can understand
         text += `\n- ${checkbox} `;
@@ -104,9 +155,11 @@ export function extractCommentText(commentBody: string | AdfNode | undefined): s
     }
     
     commentBody.content.forEach(extractTextRecursive);
+    appendJiraCommentLog(`[DEBUG] extractCommentText: ADF extracted text length: ${text.length}, content: "${text.substring(0, 200)}..."`);
     return text.trim();
   }
   
+  appendJiraCommentLog(`[DEBUG] extractCommentText: Fallback to string conversion: "${String(commentBody || '').substring(0, 100)}..."`);
   return String(commentBody || '');
 }
 
@@ -159,24 +212,44 @@ function cleanTaskText(text: string): string {
  */
 export function parseCommentForTasks(
   comment: JiraComment, 
-  commentIndex: number = 0
+  commentIndex: number = 0,
+  options: { includeMedia?: boolean; baseUrl?: string; auth?: string } = {}
 ): CommentTaskParseResult {
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Starting parse for comment ${comment.id || commentIndex}, author: ${comment.author?.displayName}`);
+  
   const commentText = extractCommentText(comment.body);
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Extracted comment text length: ${commentText.length}`);
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Full comment text: "${commentText}"`);
+  
   const tasks: CommentTask[] = [];
   const lines = commentText.split('\n');
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Split into ${lines.length} lines`);
+  
+  // Extract media from ADF if available
+  let commentMedia: CommentMedia[] = [];
+  if (options.includeMedia && comment.body && typeof comment.body === 'object' && options.baseUrl) {
+    commentMedia = extractMediaFromAdf(comment.body as AdfNode, options.baseUrl);
+    appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Found ${commentMedia.length} media items`);
+  }
   
   lines.forEach((line, lineIndex) => {
+    appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Processing line ${lineIndex}: "${line}"`);
+    
     // Check each pattern against the line
-    TASK_PATTERNS.forEach(pattern => {
+    TASK_PATTERNS.forEach((pattern, patternIndex) => {
       // Reset pattern since we're using global flag
       pattern.lastIndex = 0;
       const matches = pattern.exec(line);
       
       if (matches && matches[1]) {
+        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Pattern ${patternIndex} matched on line ${lineIndex}. Match: "${matches[0]}", captured: "${matches[1]}"`);
+        
         const taskText = cleanTaskText(matches[1]);
+        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Cleaned task text: "${taskText}"`);
         
         // Skip very short or generic text that's probably not a real task
         if (taskText.length < 5 || /^(yes|no|ok|done|etc)$/i.test(taskText)) {
+          appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Skipping task - too short or generic: "${taskText}"`);
           return;
         }
         
@@ -195,16 +268,26 @@ export function parseCommentForTasks(
           commentCreated: comment.created,
           author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
           originalPattern: matches[0].trim(),
-          lineNumber: lineIndex
+          lineNumber: lineIndex,
+          contextText: getTaskContext(lines, lineIndex),
+          media: commentMedia.length > 0 ? commentMedia : undefined
         };
         
+        appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Created task - ID: ${task.id}, text: "${task.text}", completed: ${task.completed}`);
         tasks.push(task);
+      } else {
+        // Only log for first few patterns to avoid spam
+        if (patternIndex < 3) {
+          appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Pattern ${patternIndex} did not match line ${lineIndex}: "${line}"`);
+        }
       }
     });
   });
   
   const completedTasks = tasks.filter(t => t.completed).length;
   const pendingTasks = tasks.filter(t => !t.completed).length;
+  
+  appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Final result - Total tasks: ${tasks.length}, completed: ${completedTasks}, pending: ${pendingTasks}`);
   
   return {
     tasks,
@@ -216,18 +299,32 @@ export function parseCommentForTasks(
 }
 
 /**
- * Parse multiple JIRA comments for tasks
+ * Parse multiple JIRA comments for tasks with optional media support
  */
-export function parseCommentsForTasks(comments: JiraComment[]): CommentTaskParseResult {
+export function parseCommentsForTasks(
+  comments: JiraComment[], 
+  options: { includeMedia?: boolean; baseUrl?: string; auth?: string } = {}
+): CommentTaskParseResult {
+  appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Starting to parse ${comments.length} comments`);
+  appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Options: includeMedia=${options.includeMedia}, baseUrl=${options.baseUrl}, hasAuth=${!!options.auth}`);
+  
   const allTasks: CommentTask[] = [];
   
   comments.forEach((comment, index) => {
-    const result = parseCommentForTasks(comment, index);
+    appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Processing comment ${index + 1}/${comments.length}, ID: ${comment.id}`);
+    appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment author: ${comment.author?.displayName}, created: ${comment.created}`);
+    appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment body type: ${typeof comment.body}, has content: ${!!comment.body}`);
+    
+    const result = parseCommentForTasks(comment, index, options);
+    appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: Comment ${index + 1} yielded ${result.tasks.length} tasks`);
+    
     allTasks.push(...result.tasks);
   });
   
   const completedTasks = allTasks.filter(t => t.completed).length;
   const pendingTasks = allTasks.filter(t => !t.completed).length;
+  
+  appendJiraCommentLog(`[DEBUG] parseCommentsForTasks: FINAL RESULT - Total: ${allTasks.length}, completed: ${completedTasks}, pending: ${pendingTasks}`);
   
   return {
     tasks: allTasks,
@@ -299,4 +396,111 @@ export function formatCommentTasksAsMarkdown(result: CommentTaskParseResult): st
   }
   
   return md;
+}
+
+/**
+ * Extract media nodes (images, attachments) from ADF content
+ */
+function extractMediaFromAdf(node: AdfNode, baseUrl: string): CommentMedia[] {
+  const media: CommentMedia[] = [];
+  
+  function extractRecursive(adfNode: AdfNode) {
+    // Handle media nodes (embedded images/attachments)
+    if (adfNode.type === 'media' || adfNode.type === 'mediaSingle') {
+      const mediaNode = adfNode.content?.[0] || adfNode;
+      if (mediaNode.attrs) {
+        const mediaItem: CommentMedia = {
+          type: 'image',
+          id: mediaNode.attrs.id as string,
+          url: mediaNode.attrs.url as string,
+          alt: mediaNode.attrs.alt as string,
+          width: mediaNode.attrs.width as number,
+          height: mediaNode.attrs.height as number,
+          collection: mediaNode.attrs.collection as string,
+          downloadUrl: mediaNode.attrs.url ? `${baseUrl}/secure/attachment/${mediaNode.attrs.id}` : undefined,
+          filename: `image_${mediaNode.attrs.id}.png` // Default filename
+        };
+        media.push(mediaItem);
+      }
+    }
+    
+    // Handle inline images with different formats
+    if (adfNode.type === 'inlineCard' || adfNode.type === 'blockCard') {
+      const url = adfNode.attrs?.url as string;
+      if (url && (url.includes('/secure/attachment/') || url.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
+        media.push({
+          type: 'image',
+          url: url,
+          downloadUrl: url,
+          description: 'Inline image or attachment'
+        });
+      }
+    }
+    
+    // Handle links that might be image attachments
+    if (adfNode.marks) {
+      for (const mark of adfNode.marks) {
+        if (mark.type === 'link' && mark.attrs?.href) {
+          const href = mark.attrs.href;
+          if (href.includes('/secure/attachment/') || href.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+            media.push({
+              type: 'attachment',
+              url: href,
+              downloadUrl: href,
+              description: adfNode.text || 'Linked attachment'
+            });
+          }
+        }
+      }
+    }
+    
+    // Recurse through content
+    if (adfNode.content) {
+      adfNode.content.forEach(extractRecursive);
+    }
+  }
+  
+  extractRecursive(node);
+  return media;
+}
+
+/**
+ * Get surrounding context text for a task (helpful for image association)
+ */
+function getTaskContext(lines: string[], taskLineIndex: number, contextLines: number = 2): string {
+  const start = Math.max(0, taskLineIndex - contextLines);
+  const end = Math.min(lines.length, taskLineIndex + contextLines + 1);
+  return lines.slice(start, end).join('\n');
+}
+
+/**
+ * Download and encode image as base64 for agent consumption
+ */
+export async function downloadImageAsBase64(url: string, auth?: string): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = {
+      'Accept': 'image/*'
+    };
+    
+    if (auth) {
+      headers['Authorization'] = `Basic ${auth}`;
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    if (!response.ok) {
+      appendJiraCommentLog(`Failed to download image from ${url}: ${response.status}`);
+      return null;
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = response.headers.get('content-type') || 'image/png';
+    
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    appendJiraCommentLog(`Error downloading image from ${url}: ${errorMessage}`);
+    return null;
+  }
 } 

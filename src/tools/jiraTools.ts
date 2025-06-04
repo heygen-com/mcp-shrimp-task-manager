@@ -7,7 +7,8 @@ import path from "path";
 import { 
   parseCommentsForTasks, 
   parseCommentForTasks,
-  formatCommentTasksAsMarkdown
+  formatCommentTasksAsMarkdown,
+  downloadImageAsBase64
 } from "../utils/jiraCommentTaskParser.js";
 import { 
   jiraCommentService, 
@@ -154,8 +155,8 @@ function appendJiraToolLog(message: string) {
 
 // Zod schema for the JIRA tool input
 export const JiraToolSchema = z.object({
-  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history", "get_comment_tasks", "update_comment_task", "delete"]),
-  domain: z.enum(["ticket", "project", "component", "migration", "user", "TicketComment"]),
+  action: z.enum(["create", "update", "read", "find", "list", "sync", "verify_credentials", "find_user", "history", "get_comment_tasks", "update_comment_task", "delete", "create_comment", "read_comments", "update_comment", "delete_comment", "list_comments"]),
+  domain: z.enum(["ticket", "project", "component", "migration", "user"]),
   context: z.object({
     projectKey: z.string().optional(),
     summary: z.string().optional(),
@@ -595,7 +596,8 @@ async function findJiraUser(query: string): Promise<JiraUser | null> {
 async function getJiraTicketByKey(issueKey: string): Promise<BasicJiraTicket> {
   appendJiraToolLog(`[INFO] getJiraTicketByKey: Attempting to fetch details for issue: ${issueKey}`);
   const { baseUrl, email, apiToken } = getJiraEnv();
-  const url = `${baseUrl}/rest/api/3/issue/${issueKey}?fields=*all`; 
+  // Explicitly expand comments to ensure they're returned
+  const url = `${baseUrl}/rest/api/3/issue/${issueKey}?fields=*all&expand=comments`; 
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
 
   appendJiraToolLog(`[INFO] getJiraTicketByKey: Fetching URL: ${url}`);
@@ -614,7 +616,17 @@ async function getJiraTicketByKey(issueKey: string): Promise<BasicJiraTicket> {
   }
   
   const ticketData = await res.json() as BasicJiraTicket;
-  appendJiraToolLog(`[INFO] getJiraTicketByKey: Successfully fetched details for ${issueKey}. Data size: ${JSON.stringify(ticketData).length}`);
+  
+  // Log detailed comment information for debugging
+  const commentCount = ticketData.fields?.comment?.comments?.length || 0;
+  appendJiraToolLog(`[INFO] getJiraTicketByKey: Successfully fetched details for ${issueKey}. Data size: ${JSON.stringify(ticketData).length}, Comments found: ${commentCount}`);
+  
+  if (commentCount > 0) {
+    appendJiraToolLog(`[INFO] getJiraTicketByKey: Comment details - ${ticketData.fields?.comment?.comments?.map(c => `ID:${c.id}, Author:${c.author?.displayName}, Created:${c.created}`).join('; ')}`);
+  } else {
+    appendJiraToolLog(`[WARN] getJiraTicketByKey: No comments found in API response for ${issueKey}. Comment field structure: ${JSON.stringify(ticketData.fields?.comment || 'undefined')}`);
+  }
+  
   return ticketData;
 }
 
@@ -837,211 +849,6 @@ export function formatChangelogToTimelineMarkdown(issueKey: string, changelog: J
 export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolResult> {
   appendJiraToolLog(`[INFO] jiraToolHandler: Received action: ${input.action}, domain: ${input.domain}, context: ${JSON.stringify(input.context).substring(0,100)}...`);
 
-  // Handle TicketComment domain first to avoid type narrowing issues
-  if (input.domain === "TicketComment") {
-    const { issueKey, commentId, body, visibility, expand } = input.context;
-    
-    if (!issueKey) {
-      appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment): issueKey is required for all comment operations.");
-      return {
-        markdown: "❌ Error: issueKey is required for comment operations.",
-        json: { error: "issueKey is required" },
-      };
-    }
-
-    switch (input.action) {
-      case "create": {
-        if (!body) {
-          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment create): body is required.");
-          return {
-            markdown: "❌ Error: body is required to create a comment.",
-            json: { error: "body is required" },
-          };
-        }
-
-        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment create): Creating comment for issue: ${issueKey}`);
-        
-        const request: JiraCommentCreateRequest = {
-          body: body as string | AdfNode,
-          ...(visibility && { visibility })
-        };
-
-        const result = await jiraCommentService.createComment(issueKey, request);
-        
-        if (result.success && result.data) {
-          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
-          return {
-            markdown: `# ✅ Comment Created Successfully\n\n${markdown}`,
-            json: result.data,
-            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
-          };
-        } else {
-          return {
-            markdown: `❌ Error creating comment: ${result.error}`,
-            json: { error: result.error, details: result.details }
-          };
-        }
-      }
-
-      case "read": {
-        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment read): Reading comments for issue: ${issueKey}, commentId: ${commentId || 'all'}`);
-        
-        const result = await jiraCommentService.readComments(issueKey, commentId, expand);
-        
-        if (result.success) {
-          if (commentId && 'data' in result && result.data && !('comments' in result.data)) {
-            // Single comment - result.data is JiraComment
-            const comment = result.data as JiraComment;
-            const markdown = jiraCommentService.formatCommentForDisplay(comment);
-            return {
-              markdown: `# Comment from ${issueKey}\n\n${markdown}`,
-              json: comment,
-              url: jiraCommentService.getCommentUrl(issueKey, comment.id || "")
-            };
-          } else if ('data' in result && result.data && 'comments' in result.data) {
-            // Multiple comments - result.data has comments array
-            const commentsData = result.data as { comments: JiraComment[]; maxResults: number; total: number; startAt: number; };
-            let markdown = `# Comments from ${issueKey}\n\n`;
-            markdown += `**Total:** ${commentsData.total} comments\n\n`;
-            
-            commentsData.comments.forEach((comment) => {
-              markdown += jiraCommentService.formatCommentForDisplay(comment) + '\n---\n\n';
-            });
-            
-            return {
-              markdown,
-              json: commentsData,
-              url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
-            };
-          }
-        }
-        
-        return {
-          markdown: `❌ Error reading comments: ${result.error}`,
-          json: { error: result.error, details: result.details }
-        };
-      }
-
-      case "update": {
-        if (!commentId) {
-          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment update): commentId is required.");
-          return {
-            markdown: "❌ Error: commentId is required to update a comment.",
-            json: { error: "commentId is required" },
-          };
-        }
-
-        if (!body) {
-          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment update): body is required.");
-          return {
-            markdown: "❌ Error: body is required to update a comment.",
-            json: { error: "body is required" },
-          };
-        }
-
-        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment update): Updating comment ${commentId} for issue: ${issueKey}`);
-        
-        const request: JiraCommentUpdateRequest = {
-          body: body as string | AdfNode,
-          ...(visibility && { visibility })
-        };
-
-        const result = await jiraCommentService.updateComment(issueKey, commentId, request);
-        
-        if (result.success && result.data) {
-          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
-          return {
-            markdown: `# ✅ Comment Updated Successfully\n\n${markdown}`,
-            json: result.data,
-            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
-          };
-        } else {
-          return {
-            markdown: `❌ Error updating comment: ${result.error}`,
-            json: { error: result.error, details: result.details }
-          };
-        }
-      }
-
-      case "delete": {
-        if (!commentId) {
-          appendJiraToolLog("[ERROR] jiraToolHandler (TicketComment delete): commentId is required.");
-          return {
-            markdown: "❌ Error: commentId is required to delete a comment.",
-            json: { error: "commentId is required" },
-          };
-        }
-
-        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment delete): Deleting comment ${commentId} from issue: ${issueKey}`);
-        
-        const result = await jiraCommentService.deleteComment(issueKey, commentId);
-        
-        if (result.success) {
-          return {
-            markdown: `# ✅ Comment Deleted Successfully\n\n**Issue:** ${issueKey}\n**Comment ID:** ${commentId}\n\nThe comment has been permanently removed from the JIRA issue.`,
-            json: { message: "Comment deleted successfully", issueKey, commentId },
-            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
-          };
-        } else {
-          return {
-            markdown: `❌ Error deleting comment: ${result.error}`,
-            json: { error: result.error, details: result.details }
-          };
-        }
-      }
-
-      case "list": {
-        appendJiraToolLog(`[INFO] jiraToolHandler (TicketComment list): Listing comments for issue: ${issueKey} with filters`);
-        
-        const {
-          since, until, lastMinutes, lastHours, lastDays,
-          authorAccountId, authorDisplayName, authorEmail,
-          textSearch, startAt, maxResults, orderBy, expand, includeDeleted
-        } = input.context;
-        
-        const listRequest = {
-          ...(since && { since }),
-          ...(until && { until }),
-          ...(lastMinutes && { lastMinutes }),
-          ...(lastHours && { lastHours }),
-          ...(lastDays && { lastDays }),
-          ...(authorAccountId && { authorAccountId }),
-          ...(authorDisplayName && { authorDisplayName }),
-          ...(authorEmail && { authorEmail }),
-          ...(textSearch && { textSearch }),
-          ...(startAt !== undefined && { startAt }),
-          ...(maxResults && { maxResults }),
-          ...(orderBy && { orderBy }),
-          ...(expand && { expand }),
-          ...(includeDeleted && { includeDeleted })
-        };
-        
-        const result = await jiraCommentService.listComments(issueKey, listRequest);
-        
-        if (result.success && result.data) {
-          const markdown = jiraCommentService.formatCommentListForDisplay(result.data, issueKey);
-          return {
-            markdown,
-            json: result.data,
-            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
-          };
-        } else {
-          return {
-            markdown: `❌ Error listing comments: ${result.error}`,
-            json: { error: result.error, details: result.details }
-          };
-        }
-      }
-
-      default:
-        appendJiraToolLog(`[ERROR] jiraToolHandler (TicketComment): Unsupported action '${input.action}' for TicketComment domain.`);
-        return {
-          markdown: `❌ Error: Action '${input.action}' is not supported for TicketComment domain. Supported actions: create, read, update, delete, list.`,
-          json: { error: "Unsupported action for TicketComment domain" }
-        };
-    }
-  }
-
   // Handle other domains
   switch (input.action) {
     case "create":
@@ -1107,6 +914,254 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         };
       }
       break;
+    case "create_comment": {
+      if (input.domain === "ticket") {
+        const { issueKey, body, visibility } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (create_comment): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for comment operations.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        if (!body) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (create_comment): body is required.");
+          return {
+            markdown: "❌ Error: body is required to create a comment.",
+            json: { error: "body is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (create_comment): Creating comment for issue: ${issueKey}`);
+        
+        const request: JiraCommentCreateRequest = {
+          body: body as string | AdfNode,
+          ...(visibility && { visibility })
+        };
+
+        const result = await jiraCommentService.createComment(issueKey, request);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
+          return {
+            markdown: `# ✅ Comment Created Successfully\n\n${markdown}`,
+            json: result.data,
+            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
+          };
+        } else {
+          return {
+            markdown: `❌ Error creating comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+      break;
+    }
+
+    case "read_comments": {
+      if (input.domain === "ticket") {
+        const { issueKey, commentId, expand } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (read_comments): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for comment operations.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (read_comments): Reading comments for issue: ${issueKey}, commentId: ${commentId || 'all'}`);
+        
+        const result = await jiraCommentService.readComments(issueKey, commentId, expand);
+        
+        if (result.success) {
+          if (commentId && 'data' in result && result.data && !('comments' in result.data)) {
+            // Single comment - result.data is JiraComment
+            const comment = result.data as JiraComment;
+            const markdown = jiraCommentService.formatCommentForDisplay(comment);
+            return {
+              markdown: `# Comment from ${issueKey}\n\n${markdown}`,
+              json: comment,
+              url: jiraCommentService.getCommentUrl(issueKey, comment.id || "")
+            };
+          } else if ('data' in result && result.data && 'comments' in result.data) {
+            // Multiple comments - result.data has comments array
+            const commentsData = result.data as { comments: JiraComment[]; maxResults: number; total: number; startAt: number; };
+            let markdown = `# Comments from ${issueKey}\n\n`;
+            markdown += `**Total:** ${commentsData.total} comments\n\n`;
+            
+            commentsData.comments.forEach((comment) => {
+              markdown += jiraCommentService.formatCommentForDisplay(comment) + '\n---\n\n';
+            });
+            
+            return {
+              markdown,
+              json: commentsData,
+              url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+            };
+          }
+        }
+        
+        return {
+          markdown: `❌ Error reading comments: ${result.error}`,
+          json: { error: result.error, details: result.details }
+        };
+      }
+      break;
+    }
+
+    case "update_comment": {
+      if (input.domain === "ticket") {
+        const { issueKey, commentId, body, visibility } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (update_comment): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for comment operations.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        if (!commentId) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (update_comment): commentId is required.");
+          return {
+            markdown: "❌ Error: commentId is required to update a comment.",
+            json: { error: "commentId is required" },
+          };
+        }
+
+        if (!body) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (update_comment): body is required.");
+          return {
+            markdown: "❌ Error: body is required to update a comment.",
+            json: { error: "body is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (update_comment): Updating comment ${commentId} for issue: ${issueKey}`);
+        
+        const request: JiraCommentUpdateRequest = {
+          body: body as string | AdfNode,
+          ...(visibility && { visibility })
+        };
+
+        const result = await jiraCommentService.updateComment(issueKey, commentId, request);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentForDisplay(result.data);
+          return {
+            markdown: `# ✅ Comment Updated Successfully\n\n${markdown}`,
+            json: result.data,
+            url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
+          };
+        } else {
+          return {
+            markdown: `❌ Error updating comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+      break;
+    }
+
+    case "delete_comment": {
+      if (input.domain === "ticket") {
+        const { issueKey, commentId } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (delete_comment): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for comment operations.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        if (!commentId) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (delete_comment): commentId is required.");
+          return {
+            markdown: "❌ Error: commentId is required to delete a comment.",
+            json: { error: "commentId is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (delete_comment): Deleting comment ${commentId} from issue: ${issueKey}`);
+        
+        const result = await jiraCommentService.deleteComment(issueKey, commentId);
+        
+        if (result.success) {
+          return {
+            markdown: `# ✅ Comment Deleted Successfully\n\n**Issue:** ${issueKey}\n**Comment ID:** ${commentId}\n\nThe comment has been permanently removed from the JIRA issue.`,
+            json: { message: "Comment deleted successfully", issueKey, commentId },
+            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+          };
+        } else {
+          return {
+            markdown: `❌ Error deleting comment: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+      break;
+    }
+
+    case "list_comments": {
+      if (input.domain === "ticket") {
+        const { issueKey } = input.context;
+        
+        if (!issueKey) {
+          appendJiraToolLog("[ERROR] jiraToolHandler (list_comments): issueKey is required.");
+          return {
+            markdown: "❌ Error: issueKey is required for comment operations.",
+            json: { error: "issueKey is required" },
+          };
+        }
+
+        appendJiraToolLog(`[INFO] jiraToolHandler (list_comments): Listing comments for issue: ${issueKey} with filters`);
+        
+        const {
+          since, until, lastMinutes, lastHours, lastDays,
+          authorAccountId, authorDisplayName, authorEmail,
+          textSearch, startAt, maxResults, orderBy, expand, includeDeleted
+        } = input.context;
+        
+        const listRequest = {
+          ...(since && { since }),
+          ...(until && { until }),
+          ...(lastMinutes && { lastMinutes }),
+          ...(lastHours && { lastHours }),
+          ...(lastDays && { lastDays }),
+          ...(authorAccountId && { authorAccountId }),
+          ...(authorDisplayName && { authorDisplayName }),
+          ...(authorEmail && { authorEmail }),
+          ...(textSearch && { textSearch }),
+          ...(startAt !== undefined && { startAt }),
+          ...(maxResults && { maxResults }),
+          ...(orderBy && { orderBy }),
+          ...(expand && { expand }),
+          ...(includeDeleted && { includeDeleted })
+        };
+        
+        const result = await jiraCommentService.listComments(issueKey, listRequest);
+        
+        if (result.success && result.data) {
+          const markdown = jiraCommentService.formatCommentListForDisplay(result.data, issueKey);
+          return {
+            markdown,
+            json: result.data,
+            url: `${process.env.JIRA_BASE_URL}/browse/${issueKey}`
+          };
+        } else {
+          return {
+            markdown: `❌ Error listing comments: ${result.error}`,
+            json: { error: result.error, details: result.details }
+          };
+        }
+      }
+      break;
+    }
+
     case "list":
       if (input.domain === "project") {
         const projects = await listJiraProjects();
@@ -1384,6 +1439,9 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
     case "get_comment_tasks":
       if (input.domain === "ticket") {
         const issueKey = input.context.issueKey;
+        const includeMedia = input.context.includeMedia as boolean ?? true;  // Default to true
+        const downloadImages = input.context.downloadImages as boolean ?? true;  // Default to true
+        
         if (!issueKey) {
           appendJiraToolLog("[ERROR] jiraToolHandler (get_comment_tasks): issueKey is required.");
           return {
@@ -1392,7 +1450,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           };
         }
         
-        appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Fetching comment tasks for issue: ${issueKey}`);
+        appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Fetching comment tasks for issue: ${issueKey}, includeMedia: ${includeMedia}, downloadImages: ${downloadImages}`);
         try {
           // Get full ticket data including comments
           const ticketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
@@ -1406,29 +1464,88 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             };
           }
           
-          // Parse all comments for tasks
-          const parseResult = parseCommentsForTasks(comments);
+          // Parse all comments for tasks with media support
+          const { baseUrl, email, apiToken } = getJiraEnv();
+          const auth = includeMedia ? Buffer.from(`${email}:${apiToken}`).toString("base64") : undefined;
+          
+          const parseOptions = {
+            includeMedia,
+            baseUrl,
+            auth: auth
+          };
+          
+          const parseResult = parseCommentsForTasks(comments, parseOptions);
+          
+          // Optionally download images as base64
+          if (downloadImages && parseResult.tasks.some(task => task.media && task.media.length > 0)) {
+            appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Downloading images as base64...`);
+            
+            for (const task of parseResult.tasks) {
+              if (task.media) {
+                for (const mediaItem of task.media) {
+                  if (mediaItem.downloadUrl && auth) {
+                    const base64Data = await downloadImageAsBase64(mediaItem.downloadUrl, auth);
+                    if (base64Data) {
+                      (mediaItem as Record<string, unknown>).base64Data = base64Data;
+                      appendJiraToolLog(`[INFO] Successfully downloaded image: ${mediaItem.downloadUrl}`);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          
           const markdown = formatCommentTasksAsMarkdown(parseResult);
+          
+          // Enhanced response with media information
+          let enhancedMarkdown = `# Comment Tasks for ${issueKey}\n\n${markdown}`;
+          
+          const tasksWithMedia = parseResult.tasks.filter(task => task.media && task.media.length > 0);
+          if (tasksWithMedia.length > 0) {
+            enhancedMarkdown += `\n\n## 📷 Tasks with Associated Media (${tasksWithMedia.length})\n\n`;
+            
+            tasksWithMedia.forEach((task, index) => {
+              enhancedMarkdown += `### ${index + 1}. ${task.text}\n`;
+              enhancedMarkdown += `**Context:** ${task.contextText || 'No context'}\n\n`;
+              
+              if (task.media) {
+                task.media.forEach((media, mediaIndex) => {
+                  enhancedMarkdown += `**Media ${mediaIndex + 1}:**\n`;
+                  enhancedMarkdown += `- Type: ${media.type}\n`;
+                  enhancedMarkdown += `- URL: ${media.downloadUrl || media.url || 'N/A'}\n`;
+                  if (media.alt) enhancedMarkdown += `- Alt text: ${media.alt}\n`;
+                  if (media.width && media.height) enhancedMarkdown += `- Dimensions: ${media.width}x${media.height}\n`;
+                  if ((media as Record<string, unknown>).base64Data) enhancedMarkdown += `- Base64 data: Available in JSON response\n`;
+                  enhancedMarkdown += `\n`;
+                });
+              }
+              enhancedMarkdown += `\n`;
+            });
+          }
           
           // Organize by comment for easy agent consumption
           const commentData = comments.map((comment, index) => {
-            const commentResult = parseCommentForTasks(comment, index);
+            const commentResult = parseCommentForTasks(comment, index, parseOptions);
             return {
               commentId: comment.id || `comment_${index}`,
               author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
               created: comment.created,
-              tasks: commentResult.tasks
+              tasks: commentResult.tasks,
+              hasMedia: commentResult.tasks.some(task => task.media && task.media.length > 0)
             };
           }).filter(c => c.tasks.length > 0);
           
           return {
-            markdown: `# Comment Tasks for ${issueKey}\n\n${markdown}`,
+            markdown: enhancedMarkdown,
             json: {
               issueKey,
               comments: commentData,
               totalTasks: parseResult.totalTasks,
               pendingTasks: parseResult.pendingTasks,
-              completedTasks: parseResult.completedTasks
+              completedTasks: parseResult.completedTasks,
+              mediaSupport: includeMedia,
+              imagesDownloaded: downloadImages,
+              tasksWithMedia: tasksWithMedia.length
             },
             url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
           };
@@ -1447,7 +1564,6 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           json: { error: "Invalid domain for get_comment_tasks" }
         };
       }
-      
     case "update_comment_task":
       if (input.domain === "ticket") {
         const { issueKey, taskId, completed } = input.context;
