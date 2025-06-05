@@ -226,17 +226,20 @@ export async function parseCommentForTasks(
   appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Split into ${lines.length} lines`);
   
   // Extract media from ADF if available
-  let commentMedia: CommentMedia[] = [];
+  let media: CommentMedia[] = [];
   let downloadedImages: { id: string; base64Data: string; contentType: string; error?: string }[] = [];
   
   if (options.includeMedia && comment.body && typeof comment.body === 'object' && options.baseUrl) {
-    commentMedia = extractMediaFromAdf(comment.body as AdfNode, options.baseUrl);
-    appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Found ${commentMedia.length} media items`);
+    media = extractMediaFromAdf(comment.body as AdfNode, options.baseUrl);
+    appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Found ${media.length} media items`);
     
-    // Download images with authentication if available
-    if (commentMedia.length > 0 && options.auth) {
-      downloadedImages = await downloadAuthenticatedImages(commentMedia, options.auth);
-      appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Downloaded ${downloadedImages.filter(img => !img.error).length}/${downloadedImages.length} images successfully`);
+    // If media support is enabled and we have media, download the images
+    if (options.includeMedia && media.length > 0 && options.auth) {
+      appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Attempting to download ${media.length} images with auth`);
+      downloadedImages = await downloadAuthenticatedImages(media, options.auth);
+      appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Downloaded ${downloadedImages.filter(img => img.base64Data && !img.error).length}/${downloadedImages.length} images successfully`);
+    } else {
+      appendJiraCommentLog(`[DEBUG] parseCommentForTasks: Skipping image downloads - includeMedia: ${options.includeMedia}, mediaCount: ${media.length}, hasAuth: ${!!options.auth}`);
     }
   }
   
@@ -292,7 +295,7 @@ export async function parseCommentForTasks(
           originalPattern: matches[0].trim(),
           lineNumber: lineIndex,
           contextText: getTaskContext(lines, lineIndex),
-          media: commentMedia.length > 0 ? commentMedia : undefined,
+          media: media.length > 0 ? media : undefined,
           uiContext: {
             ...uiContext,
             enhancedDescription
@@ -439,17 +442,34 @@ function extractMediaFromAdf(node: AdfNode, baseUrl: string): CommentMedia[] {
     if (adfNode.type === 'media' || adfNode.type === 'mediaSingle') {
       const mediaNode = adfNode.content?.[0] || adfNode;
       if (mediaNode.attrs) {
+        const mediaId = mediaNode.attrs.id as string;
+        const collection = mediaNode.attrs.collection as string;
+        
+        // Construct proper JIRA download URL - use attachment content endpoint
+        let downloadUrl: string | undefined;
+        if (mediaId) {
+          if (collection) {
+            // For media with collection, use the media endpoint
+            downloadUrl = `${baseUrl}/rest/api/3/attachment/content/${mediaId}`;
+          } else {
+            // For regular attachments, use attachment endpoint  
+            downloadUrl = `${baseUrl}/rest/api/3/attachment/content/${mediaId}`;
+          }
+        }
+        
         const mediaItem: CommentMedia = {
           type: 'image',
-          id: mediaNode.attrs.id as string,
+          id: mediaId,
           url: mediaNode.attrs.url as string,
           alt: mediaNode.attrs.alt as string,
           width: mediaNode.attrs.width as number,
           height: mediaNode.attrs.height as number,
-          collection: mediaNode.attrs.collection as string,
-          downloadUrl: mediaNode.attrs.url ? `${baseUrl}/secure/attachment/${mediaNode.attrs.id}` : undefined,
-          filename: `image_${mediaNode.attrs.id}.png` // Default filename
+          collection: collection,
+          downloadUrl: downloadUrl,
+          filename: `image_${mediaId}.png` // Default filename
         };
+        
+        appendJiraCommentLog(`[DEBUG] extractMediaFromAdf: Found media - ID: ${mediaId}, collection: ${collection}, downloadUrl: ${downloadUrl}`);
         media.push(mediaItem);
       }
     }
@@ -458,12 +478,19 @@ function extractMediaFromAdf(node: AdfNode, baseUrl: string): CommentMedia[] {
     if (adfNode.type === 'inlineCard' || adfNode.type === 'blockCard') {
       const url = adfNode.attrs?.url as string;
       if (url && (url.includes('/secure/attachment/') || url.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
+        // Extract attachment ID from URL if possible
+        const attachmentIdMatch = url.match(/\/attachment\/(\d+)\//);
+        const attachmentId = attachmentIdMatch ? attachmentIdMatch[1] : 'unknown';
+        
         media.push({
           type: 'image',
+          id: attachmentId,
           url: url,
-          downloadUrl: url,
+          downloadUrl: url.includes('/secure/attachment/') ? url : `${baseUrl}/rest/api/3/attachment/content/${attachmentId}`,
           description: 'Inline image or attachment'
         });
+        
+        appendJiraCommentLog(`[DEBUG] extractMediaFromAdf: Found inline media - URL: ${url}, extractedID: ${attachmentId}`);
       }
     }
     
@@ -473,12 +500,19 @@ function extractMediaFromAdf(node: AdfNode, baseUrl: string): CommentMedia[] {
         if (mark.type === 'link' && mark.attrs?.href) {
           const href = mark.attrs.href;
           if (href.includes('/secure/attachment/') || href.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+            // Extract attachment ID from href if possible
+            const attachmentIdMatch = href.match(/\/attachment\/(\d+)\//);
+            const attachmentId = attachmentIdMatch ? attachmentIdMatch[1] : 'unknown';
+            
             media.push({
               type: 'attachment',
+              id: attachmentId,
               url: href,
-              downloadUrl: href,
+              downloadUrl: href.includes('/secure/attachment/') ? href : `${baseUrl}/rest/api/3/attachment/content/${attachmentId}`,
               description: adfNode.text || 'Linked attachment'
             });
+            
+            appendJiraCommentLog(`[DEBUG] extractMediaFromAdf: Found linked media - href: ${href}, extractedID: ${attachmentId}`);
           }
         }
       }
@@ -491,6 +525,7 @@ function extractMediaFromAdf(node: AdfNode, baseUrl: string): CommentMedia[] {
   }
   
   extractRecursive(node);
+  appendJiraCommentLog(`[DEBUG] extractMediaFromAdf: Total media items extracted: ${media.length}`);
   return media;
 }
 
@@ -504,35 +539,118 @@ function getTaskContext(lines: string[], taskLineIndex: number, contextLines: nu
 }
 
 /**
- * Download and encode image as base64 for agent consumption
+ * Download authenticated JIRA images and convert to base64
  */
-export async function downloadImageAsBase64(url: string, auth?: string): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = {
-      'Accept': 'image/*'
-    };
-    
-    if (auth) {
-      headers['Authorization'] = `Basic ${auth}`;
-    }
-    
-    const response = await fetch(url, { headers });
-    
-    if (!response.ok) {
-      appendJiraCommentLog(`Failed to download image from ${url}: ${response.status}`);
-      return null;
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = response.headers.get('content-type') || 'image/png';
-    
-    return `data:${contentType};base64,${buffer.toString('base64')}`;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    appendJiraCommentLog(`Error downloading image from ${url}: ${errorMessage}`);
-    return null;
+async function downloadAuthenticatedImages(
+  media: CommentMedia[], 
+  auth?: string
+): Promise<{ id: string; base64Data: string; contentType: string; error?: string }[]> {
+  appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Starting download process - media count: ${media.length}, hasAuth: ${!!auth}`);
+  
+  if (!auth || media.length === 0) {
+    appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Skipping downloads - auth: ${!!auth}, mediaCount: ${media.length}`);
+    return [];
   }
+  
+  const downloadedImages = [];
+  
+  // Deduplicate media items by ID to avoid duplicate downloads
+  const uniqueMedia = media.filter((item, index, self) => 
+    index === self.findIndex(m => m.id === item.id)
+  );
+  
+  appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Deduplicated ${media.length} media items to ${uniqueMedia.length} unique items`);
+  
+  for (const mediaItem of uniqueMedia) {
+    appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Processing media item - ID: ${mediaItem.id}, downloadUrl: ${mediaItem.downloadUrl}`);
+    
+    if (mediaItem.downloadUrl && mediaItem.id) {
+      let downloadSuccess = false;
+      
+      // Try multiple download strategies
+      const downloadStrategies: Array<{ url: string; headers: Record<string, string>; name: string }> = [
+        // Strategy 1: API endpoint with auth
+        {
+          url: mediaItem.downloadUrl,
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Accept': '*/*',
+            'User-Agent': 'MCP-Shrimp-TaskManager/1.0'
+          },
+          name: 'API with auth'
+        },
+        // Strategy 2: Browser-accessible URL (no auth needed for some JIRA instances)
+        {
+          url: mediaItem.downloadUrl.replace('/rest/api/3/attachment/content/', '/secure/attachment/'),
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+          },
+          name: 'Secure attachment (no auth)'
+        },
+        // Strategy 3: Direct file URL if we can construct it
+        {
+          url: `${mediaItem.downloadUrl.split('/rest/')[0]}/secure/attachment/${mediaItem.id}/${mediaItem.filename || `attachment_${mediaItem.id}`}`,
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+          },
+          name: 'Direct file URL'
+        }
+      ];
+      
+      for (const strategy of downloadStrategies) {
+        if (downloadSuccess) break;
+        
+        try {
+          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Trying ${strategy.name}: ${strategy.url}`);
+          
+          const response = await fetch(strategy.url, { headers: strategy.headers });
+          
+          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ${strategy.name} response: ${response.status}`);
+          
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const contentType = response.headers.get('content-type') || 'image/png';
+            const base64Data = `data:${contentType};base64,${buffer.toString('base64')}`;
+            
+            downloadedImages.push({
+              id: mediaItem.id,
+              base64Data,
+              contentType
+            });
+            
+            appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ✅ Successfully downloaded with ${strategy.name}, size: ${buffer.length} bytes, contentType: ${contentType}`);
+            downloadSuccess = true;
+            break;
+          } else {
+            appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ${strategy.name} failed: ${response.status}`);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ${strategy.name} exception: ${errorMessage}`);
+        }
+      }
+      
+      if (!downloadSuccess) {
+        downloadedImages.push({
+          id: mediaItem.id,
+          base64Data: '',
+          contentType: '',
+          error: `All download strategies failed (API auth, secure attachment, direct URL)`
+        });
+        
+        appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ❌ All download strategies failed for ${mediaItem.id}`);
+      }
+    } else {
+      appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ⚠️ No downloadUrl or ID for media item`);
+    }
+  }
+  
+  const successCount = downloadedImages.filter(img => img.base64Data && !img.error).length;
+  appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: ✅ Download process complete - successful: ${successCount}/${downloadedImages.length}`);
+  return downloadedImages;
 }
 
 /**
@@ -635,70 +753,4 @@ export interface EnhancedCommentTask extends CommentTask {
     contentType: string;
     error?: string;
   }[];
-}
-
-/**
- * Download authenticated JIRA images and convert to base64
- */
-async function downloadAuthenticatedImages(
-  media: CommentMedia[], 
-  auth?: string
-): Promise<{ id: string; base64Data: string; contentType: string; error?: string }[]> {
-  if (!auth || media.length === 0) {
-    return [];
-  }
-  
-  const downloadedImages = [];
-  
-  for (const mediaItem of media) {
-    if (mediaItem.downloadUrl) {
-      appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Downloading ${mediaItem.downloadUrl}`);
-      
-      try {
-        const response = await fetch(mediaItem.downloadUrl, {
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Accept': 'image/*'
-          }
-        });
-        
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const contentType = response.headers.get('content-type') || 'image/png';
-          const base64Data = `data:${contentType};base64,${buffer.toString('base64')}`;
-          
-          downloadedImages.push({
-            id: mediaItem.id || 'unknown',
-            base64Data,
-            contentType
-          });
-          
-          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Successfully downloaded ${mediaItem.downloadUrl}, size: ${buffer.length} bytes`);
-        } else {
-          const errorText = await response.text();
-          downloadedImages.push({
-            id: mediaItem.id || 'unknown',
-            base64Data: '',
-            contentType: '',
-            error: `HTTP ${response.status}: ${errorText}`
-          });
-          
-          appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Failed to download ${mediaItem.downloadUrl}: ${response.status} ${errorText}`);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        downloadedImages.push({
-          id: mediaItem.id || 'unknown',
-          base64Data: '',
-          contentType: '',
-          error: errorMessage
-        });
-        
-        appendJiraCommentLog(`[DEBUG] downloadAuthenticatedImages: Exception downloading ${mediaItem.downloadUrl}: ${errorMessage}`);
-      }
-    }
-  }
-  
-  return downloadedImages;
 } 

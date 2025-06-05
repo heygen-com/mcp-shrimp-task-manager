@@ -6,8 +6,6 @@ import fsSync from 'fs';
 import path from "path";
 import { 
   parseCommentsForTasks, 
-  parseCommentForTasks,
-  formatCommentTasksAsMarkdown,
   EnhancedCommentTask
 } from "../utils/jiraCommentTaskParser.js";
 import { 
@@ -1440,7 +1438,6 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
       if (input.domain === "ticket") {
         const issueKey = input.context.issueKey;
         const includeMedia = input.context.includeMedia as boolean ?? true;  // Default to true
-        const downloadImages = input.context.downloadImages as boolean ?? true;  // Default to true
         
         if (!issueKey) {
           appendJiraToolLog("[ERROR] jiraToolHandler (get_comment_tasks): issueKey is required.");
@@ -1450,7 +1447,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           };
         }
         
-        appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Fetching comment tasks for issue: ${issueKey}, includeMedia: ${includeMedia}, downloadImages: ${downloadImages}`);
+        appendJiraToolLog(`[INFO] jiraToolHandler (get_comment_tasks): Fetching comment tasks for issue: ${issueKey}, includeMedia: ${includeMedia}`);
         try {
           // Get full ticket data including comments
           const ticketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
@@ -1476,162 +1473,77 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           
           const parseResult = await parseCommentsForTasks(comments, parseOptions);
           
-          // Optionally download images as base64 (this is now handled automatically in parseCommentsForTasks)
-          const markdown = formatCommentTasksAsMarkdown(parseResult);
-          
-          // Enhanced response with media information and UI context
-          let enhancedMarkdown = `# Comment Tasks for ${issueKey}\n\n${markdown}`;
-          
-          const tasksWithMedia = parseResult.tasks.filter(task => task.media && task.media.length > 0);
-          const tasksWithContext = parseResult.tasks.filter(task => (task as EnhancedCommentTask).uiContext && (task as EnhancedCommentTask).uiContext!.searchQueries.length > 0);
-          
-          if (tasksWithMedia.length > 0) {
-            enhancedMarkdown += `\n\n## 📷 Tasks with Associated Media (${tasksWithMedia.length})\n\n`;
+          // Create simplified response structure
+          const simplifiedTasks = parseResult.tasks.map(task => {
+            const enhancedTask = task as EnhancedCommentTask;
             
-            tasksWithMedia.forEach((task, index) => {
-              enhancedMarkdown += `### ${index + 1}. ${task.text}\n`;
-              enhancedMarkdown += `**Context:** ${task.contextText || 'No context'}\n\n`;
-              
-              if (task.media) {
-                task.media.forEach((media, mediaIndex) => {
-                  enhancedMarkdown += `**Media ${mediaIndex + 1}:**\n`;
-                  enhancedMarkdown += `- Type: ${media.type}\n`;
-                  enhancedMarkdown += `- URL: ${media.downloadUrl || media.url || 'N/A'}\n`;
-                  if (media.alt) enhancedMarkdown += `- Alt text: ${media.alt}\n`;
-                  if (media.width && media.height) enhancedMarkdown += `- Dimensions: ${media.width}x${media.height}\n`;
-                  enhancedMarkdown += `\n`;
-                });
-              }
-              
-              // Show downloaded images info
-              const enhancedTask = task as EnhancedCommentTask;
-              if (enhancedTask.downloadedImages) {
-                enhancedMarkdown += `**Downloaded Images:** ${enhancedTask.downloadedImages.filter(img => !img.error).length}/${enhancedTask.downloadedImages.length} successful\n`;
-              }
-              
-              enhancedMarkdown += `\n`;
-            });
-          }
-          
-          if (tasksWithContext.length > 0) {
-            enhancedMarkdown += `\n\n## 🎯 Tasks with UI Context (${tasksWithContext.length})\n\n`;
+            // Only include successful downloads
+            const successfulImages = enhancedTask.downloadedImages?.filter(img => img.base64Data && !img.error) || [];
             
-            tasksWithContext.forEach((task, index) => {
-              const enhancedTask = task as EnhancedCommentTask;
-              enhancedMarkdown += `### ${index + 1}. ${enhancedTask.uiContext!.enhancedDescription}\n`;
-              enhancedMarkdown += `**Suggested codebase searches:**\n`;
-              enhancedTask.uiContext!.searchQueries.slice(0, 5).forEach((query: string) => {
-                enhancedMarkdown += `- \`${query}\`\n`;
-              });
-              enhancedMarkdown += `\n`;
-            });
-          }
-          
-          // Organize by comment for easy agent consumption
-          const commentData = [];
-          
-          // Type for enhanced JSON task structure
-          type EnhancedJsonTask = EnhancedCommentTask & {
-            analysisMetadata: {
-              hasImages: boolean;
-              imageCount: number;
-              successfulDownloads: number;
-              totalImageBytes: number;
-              ocrReady: boolean;
-              suggestedOcrTools: string[];
-              componentAnalysisHints: {
-                likelyUIScreenshot: boolean;
-                detectedUIElements: string[];
-                suggestedCodebaseSearches: string[];
-                i18nKeyPatterns: Array<{
-                  original: string;
-                  snakeCase: string;
-                  camelCase: string;
-                  withPrefix: string;
-                }>;
-              };
+            return {
+              id: task.id,
+              text: task.text,
+              completed: task.completed,
+              author: task.author,
+              commentId: task.commentId,
+              
+              // Simplified media section - only include successful downloads
+              images: successfulImages.map(img => ({
+                id: img.id,
+                base64Data: img.base64Data,  // Agents look for this
+                contentType: img.contentType
+              })),
+              
+              // Simplified UI context
+              uiHints: enhancedTask.uiContext ? {
+                pages: enhancedTask.uiContext.pages,
+                components: enhancedTask.uiContext.components,
+                actions: enhancedTask.uiContext.actions,
+                codebaseSearches: enhancedTask.uiContext.searchQueries.slice(0, 5)
+              } : undefined,
+              
+              // Essential flags for agents
+              hasImages: successfulImages.length > 0,
+              isOcrReady: successfulImages.length > 0
             };
-          };
+          });
           
-          for (let i = 0; i < comments.length; i++) {
-            const comment = comments[i];
-            const commentResult = await parseCommentForTasks(comment, i, parseOptions);
-            
-            // Enhance tasks with additional metadata for agent analysis
-            const enhancedTasksForJson = commentResult.tasks.map(task => {
-              const enhancedTask = task as EnhancedCommentTask;
-              return {
-                ...task,
-                // Explicitly include uiContext for proper typing
-                uiContext: enhancedTask.uiContext,
-                // Ensure downloadedImages are included with full base64 data
-                downloadedImages: enhancedTask.downloadedImages || [],
-                // Add analysis metadata
-                analysisMetadata: {
-                  hasImages: (enhancedTask.downloadedImages?.length || 0) > 0,
-                  imageCount: enhancedTask.downloadedImages?.length || 0,
-                  successfulDownloads: enhancedTask.downloadedImages?.filter(img => img.base64Data && !img.error).length || 0,
-                  totalImageBytes: enhancedTask.downloadedImages?.reduce((total, img) => {
-                    return total + (img.base64Data ? Buffer.from(img.base64Data.split(',')[1] || '', 'base64').length : 0);
-                  }, 0) || 0,
-                  // OCR readiness indicators
-                  ocrReady: (enhancedTask.downloadedImages?.filter(img => img.base64Data && !img.error).length || 0) > 0,
-                  suggestedOcrTools: ['tesseract', 'google-vision', 'azure-cognitive'],
-                  // Component analysis hints
-                  componentAnalysisHints: {
-                    likelyUIScreenshot: enhancedTask.uiContext?.pages.length || enhancedTask.uiContext?.components.length ? true : false,
-                    detectedUIElements: enhancedTask.uiContext?.actions || [],
-                    suggestedCodebaseSearches: enhancedTask.uiContext?.searchQueries.slice(0, 10) || [],
-                    i18nKeyPatterns: enhancedTask.uiContext?.actions.map(action => ({
-                      original: action,
-                      snakeCase: action.toLowerCase().replace(/\s+/g, '_'),
-                      camelCase: action.toLowerCase().replace(/\s+(.)/g, (_, letter) => letter.toUpperCase()),
-                      withPrefix: `video_menu_action_${action.toLowerCase().replace(/\s+/g, '_')}`
-                    })) || []
-                  }
-                }
-              };
-            });
-            
-            commentData.push({
-              commentId: comment.id || `comment_${i}`,
-              author: comment.author?.displayName || comment.author?.emailAddress || 'Unknown',
-              created: comment.created,
-              tasks: enhancedTasksForJson,
-              hasMedia: commentResult.tasks.some(task => task.media && task.media.length > 0),
-              hasUIContext: commentResult.tasks.some(task => (task as EnhancedCommentTask).uiContext && (task as EnhancedCommentTask).uiContext!.searchQueries.length > 0)
+          // Simplified markdown
+          let markdown = `# Comment Tasks for ${issueKey}\n\n`;
+          markdown += `**Total Tasks:** ${parseResult.totalTasks} | **Pending:** ${parseResult.pendingTasks} | **Completed:** ${parseResult.completedTasks}\n\n`;
+          
+          const tasksWithImages = simplifiedTasks.filter(task => task.hasImages);
+          if (tasksWithImages.length > 0) {
+            markdown += `## 📷 Tasks with Downloaded Images (${tasksWithImages.length})\n\n`;
+            tasksWithImages.forEach((task, index) => {
+              markdown += `### ${index + 1}. ${task.text}\n`;
+              markdown += `**Images:** ${task.images.length} successfully downloaded\n`;
+              if (task.uiHints) {
+                markdown += `**UI Context:** Pages: ${task.uiHints.pages.join(', ')} | Components: ${task.uiHints.components.join(', ')}\n`;
+              }
+              markdown += `\n`;
             });
           }
           
+          // Simplified JSON response
           return {
-            markdown: enhancedMarkdown,
+            markdown,
             json: {
               issueKey,
-              comments: commentData.filter(c => c.tasks.length > 0),
               totalTasks: parseResult.totalTasks,
               pendingTasks: parseResult.pendingTasks,
               completedTasks: parseResult.completedTasks,
-              mediaSupport: includeMedia,
-              imagesDownloaded: downloadImages,
-              tasksWithMedia: tasksWithMedia.length,
-              tasksWithContext: tasksWithContext.length,
-              // Enhanced metadata for agent workflows
-              enhancedAnalysis: {
-                totalImages: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.downloadedImages?.length || 0), 0), 0),
-                totalSuccessfulDownloads: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.analysisMetadata?.successfulDownloads || 0), 0), 0),
-                totalImageSizeBytes: commentData.reduce((total, c) => total + c.tasks.reduce((taskTotal, t: EnhancedJsonTask) => taskTotal + (t.analysisMetadata?.totalImageBytes || 0), 0), 0),
-                ocrReadyTasks: commentData.reduce((total, c) => total + c.tasks.filter((t: EnhancedJsonTask) => t.analysisMetadata?.ocrReady).length, 0),
-                detectedPages: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.pages || [])))],
-                detectedComponents: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.components || [])))],
-                detectedActions: [...new Set(commentData.flatMap(c => c.tasks.flatMap((t: EnhancedJsonTask) => t.uiContext?.actions || [])))],
-                // Agent workflow suggestions
-                suggestedNextSteps: [
-                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.analysisMetadata?.ocrReady)) ? "Run OCR on downloaded images for text extraction" : null,
-                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.uiContext?.searchQueries.length)) ? "Use provided searchQueries for codebase component correlation" : null,
-                  commentData.some(c => c.tasks.some((t: EnhancedJsonTask) => t.analysisMetadata?.componentAnalysisHints.i18nKeyPatterns.length)) ? "Use i18nKeyPatterns for localization key matching" : null,
-                  "Cross-reference detected UI elements with codebase components",
-                  "Generate automated i18n key mappings from extracted text"
-                ].filter(Boolean)
+              
+              // Main tasks array - simplified structure
+              tasks: simplifiedTasks,
+              
+              // Summary stats
+              summary: {
+                tasksWithImages: tasksWithImages.length,
+                totalImagesDownloaded: simplifiedTasks.reduce((total, task) => total + task.images.length, 0),
+                ocrReadyTasks: simplifiedTasks.filter(task => task.isOcrReady).length,
+                detectedPages: [...new Set(simplifiedTasks.flatMap(task => task.uiHints?.pages || []))],
+                detectedComponents: [...new Set(simplifiedTasks.flatMap(task => task.uiHints?.components || []))]
               }
             },
             url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
@@ -1651,6 +1563,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           json: { error: "Invalid domain for get_comment_tasks" }
         };
       }
+      break;
     case "update_comment_task":
       if (input.domain === "ticket") {
         const { issueKey, taskId, completed } = input.context;
@@ -1801,6 +1714,111 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 updateMethod = "Update ADF taskItem via JIRA API";
                 taskInfo = { commentId, localId, type: "ADF taskItem" };
                 isAdfTask = true;
+                
+                appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Implementing ADF task update - commentId: ${commentId}, localId: ${localId}`);
+                
+                // Step 1: Get the full ticket to access comments
+                const ticketData = await getJiraTicketByKey(issueKey) as BasicJiraTicket;
+                const comments = ticketData.fields?.comment?.comments || [];
+                
+                // Step 2: Find the specific comment by ID
+                const targetComment = comments.find(comment => comment.id === commentId);
+                
+                if (!targetComment) {
+                  appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): Comment with ID ${commentId} not found in ticket ${issueKey}`);
+                  return {
+                    markdown: `❌ Error: Comment with ID ${commentId} not found in ticket ${issueKey}.`,
+                    json: { error: "Comment not found", commentId, issueKey },
+                    url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+                  };
+                }
+                
+                // Step 3: Verify the comment has ADF content
+                if (!targetComment.body || typeof targetComment.body !== 'object' || targetComment.body.type !== 'doc') {
+                  appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): Comment ${commentId} does not contain ADF content`);
+                  return {
+                    markdown: `❌ Error: Comment ${commentId} does not contain ADF content that can be updated.`,
+                    json: { error: "Comment not ADF format", commentId, issueKey },
+                    url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+                  };
+                }
+                
+                // Step 4: Clone and search for the taskItem with matching localId
+                const updatedBody = JSON.parse(JSON.stringify(targetComment.body));
+                let updateCount = 0;
+                let taskItemFound = false;
+                
+                function findAndUpdateTaskItem(node: AdfNode): void {
+                  if (node.type === 'taskItem' && node.attrs?.localId === localId) {
+                    node.attrs.state = completed ? 'DONE' : 'TODO';
+                    updateCount++;
+                    taskItemFound = true;
+                    appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Updated taskItem ${localId} state to ${node.attrs.state}`);
+                  }
+                  if (node.content) {
+                    node.content.forEach(findAndUpdateTaskItem);
+                  }
+                }
+                
+                findAndUpdateTaskItem(updatedBody);
+                
+                if (!taskItemFound || updateCount === 0) {
+                  appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): TaskItem with localId ${localId} not found in comment ${commentId}`);
+                  return {
+                    markdown: `❌ Error: TaskItem with localId ${localId} not found in comment ${commentId}.`,
+                    json: { error: "TaskItem not found in comment", localId, commentId, issueKey },
+                    url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+                  };
+                }
+                
+                // Step 5: Update the comment via JIRA API
+                const { baseUrl, email, apiToken } = getJiraEnv();
+                const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
+                const updateUrl = `${baseUrl}/rest/api/3/issue/${issueKey}/comment/${commentId}`;
+                
+                appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Updating comment ${commentId} via JIRA API`);
+                
+                const updatePayload = {
+                  body: updatedBody
+                };
+                
+                const response = await fetch(updateUrl, {
+                  method: "PUT",
+                  headers: {
+                    "Authorization": `Basic ${auth}`,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify(updatePayload),
+                });
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  appendJiraToolLog(`[ERROR] jiraToolHandler (update_comment_task): JIRA API error ${response.status}: ${errorText}`);
+                  return {
+                    markdown: `❌ Error updating JIRA comment: ${response.status} ${errorText}`,
+                    json: { error: `JIRA API error: ${response.status}`, details: errorText },
+                  };
+                }
+                
+                appendJiraToolLog(`[SUCCESS] jiraToolHandler (update_comment_task): Successfully updated ADF taskItem ${localId} to ${completed ? 'DONE' : 'TODO'}`);
+                
+                return {
+                  markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${commentId}\n**Local ID:** ${localId}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
+                  json: {
+                    issueKey,
+                    taskId: taskIdStr,
+                    completed,
+                    updateMethod,
+                    taskInfo,
+                    isAdfTask: true,
+                    updated: true,
+                    commentId,
+                    localId,
+                    newState: completed ? 'DONE' : 'TODO'
+                  },
+                  url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+                };
               }
             }
             // Check if it's our generated text task ID: ct_{commentId}_{line}_{hash}
@@ -1821,34 +1839,30 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             
             appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Parsed task format - Method: ${updateMethod}, Type: ${taskInfo.type}`);
             
-            // For now, return guidance for these formats (could implement text-based updates later)
-            const guidanceText = isAdfTask ? 
-              (taskInfo.commentId ? 
-                `This ADF task would be updated using JIRA's taskItem API with localId: ${taskInfo.localId} in comment: ${taskInfo.commentId}` :
-                `This ADF task would be updated using JIRA's taskItem API with localId: ${taskInfo.localId}. Comment ID needs to be located via ticket scan.`
-              ) :
-              (taskInfo.lineNumber ? 
+            // For non-ADF formats, return guidance for these formats (could implement text-based updates later)
+            if (!isAdfTask) {
+              const guidanceText = taskInfo.lineNumber ? 
                 `This text-based task would be updated by modifying comment ${taskInfo.commentId} at line ${taskInfo.lineNumber}` :
-                `Task format not recognized. Expected format: adf_{commentId}_{localId} or ct_{commentId}_{line}_{hash}`
-              );
-            
-            return {
-              markdown: `# 📋 Comment Task Update Request\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskId}\n**Status:** ${completed ? 'Mark Completed' : 'Mark Pending'}\n**Method:** ${updateMethod}\n\n${guidanceText}\n\n**Next Steps:**\n${isAdfTask ? 
-                '- Locate the comment containing this task\n- Use JIRA API to update taskItem state to ' + (completed ? 'DONE' : 'TODO') :
-                '- Parse comment text to find and update checkbox\n- Update comment via JIRA API'
-              }\n\n*Note: This format requires additional implementation for full automation.*`,
-              json: {
-                issueKey,
-                taskId, 
-                completed,
-                updateMethod,
-                taskInfo,
-                isAdfTask,
-                updated: false,
-                message: "Non-UUID task format - additional implementation needed"
-              },
-              url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
-            };
+                `Task format not recognized. Expected format: adf_{commentId}_{localId} or ct_{commentId}_{line}_{hash}`;
+              
+              return {
+                markdown: `# 📋 Comment Task Update Request\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskId}\n**Status:** ${completed ? 'Mark Completed' : 'Mark Pending'}\n**Method:** ${updateMethod}\n\n${guidanceText}\n\n**Next Steps:**\n${taskInfo.lineNumber ? 
+                  '- Parse comment text to find and update checkbox\n- Update comment via JIRA API' :
+                  '- Identify task format and implement appropriate update logic'
+                }\n\n*Note: This format requires additional implementation for full automation.*`,
+                json: {
+                  issueKey,
+                  taskId, 
+                  completed,
+                  updateMethod,
+                  taskInfo,
+                  isAdfTask: false,
+                  updated: false,
+                  message: "Non-ADF task format - additional implementation needed"
+                },
+                url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
+              };
+            }
           }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1865,6 +1879,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           json: { error: "Invalid domain for update_comment_task" }
         };
       }
+      break;
     case "delete":
       if (input.domain === "ticket") {
         const { issueKey } = input.context;
