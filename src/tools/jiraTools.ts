@@ -33,10 +33,10 @@ interface AdfNode {
   attrs?: {
     state?: string;
     localId?: string;
+    panelType?: string;
     [key: string]: unknown;
   };
-  // attrs?: any; // Could be further specified if needed
-  // marks?: any[]; // Could be further specified if needed
+  marks?: Array<{ type: string }>;
 }
 
 interface JiraComment {
@@ -168,6 +168,7 @@ export const JiraToolSchema = z.object({
     userQuery: z.string().optional(), // Explicit field for user search query
     taskId: z.string().optional(), // For comment task operations
     completed: z.boolean().optional(), // For marking comment tasks complete
+    completionNote: z.string().optional(), // Note describing what was done when completing a task
     // Comment-specific fields
     commentId: z.string().optional(), // For targeting specific comments
     body: z.union([z.string(), z.record(z.any())]).optional(), // Comment body content
@@ -252,6 +253,92 @@ async function writeLocalJiraTickets(projectKey: string, tickets: unknown[]): Pr
   const filePath = getJiraTicketsPath(projectKey);
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(tickets, null, 2));
+}
+
+// Helper to append a completion note to ADF document
+function appendCompletionNoteToADF(adfDoc: AdfNode, taskText: string, completionNote: string, completed: boolean): void {
+  if (!adfDoc.content) {
+    adfDoc.content = [];
+  }
+
+  // Create a panel with the completion note
+  const timestamp = new Date().toISOString();
+  const action = completed ? "completed" : "reopened";
+  
+  const panel: AdfNode = {
+    type: "panel",
+    attrs: {
+      panelType: completed ? "success" : "info"
+    },
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: `Task ${action}: `,
+            marks: [{ type: "strong" }]
+          },
+          {
+            type: "text",
+            text: taskText.length > 100 ? taskText.substring(0, 100) + "..." : taskText
+          }
+        ]
+      },
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: completed ? "✅ What was done: " : "↩️ Reason for reopening: ",
+            marks: [{ type: "strong" }]
+          },
+          {
+            type: "text",
+            text: completionNote
+          }
+        ]
+      },
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: `Updated at: ${new Date(timestamp).toLocaleString()}`,
+            marks: [{ type: "em" }]
+          }
+        ]
+      }
+    ]
+  };
+
+  // Add a separator before the panel
+  adfDoc.content.push({
+    type: "rule"
+  });
+
+  // Add the panel
+  adfDoc.content.push(panel);
+}
+
+// Helper to extract text from taskItem node
+function extractTextFromTaskItem(taskItem: AdfNode): string {
+  let text = "";
+  
+  function extractText(node: AdfNode) {
+    if (node.type === 'text' && node.text) {
+      text += node.text;
+    }
+    if (node.content) {
+      node.content.forEach(extractText);
+    }
+  }
+  
+  if (taskItem.content) {
+    taskItem.content.forEach(extractText);
+  }
+  
+  return text.trim();
 }
 
 // Helper to convert plain text to Atlassian Document Format (ADF)
@@ -1566,7 +1653,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
       break;
     case "update_comment_task":
       if (input.domain === "ticket") {
-        const { issueKey, taskId, completed } = input.context;
+        const { issueKey, taskId, completed, completionNote } = input.context;
         
         if (!issueKey || !taskId || completed === undefined) {
           appendJiraToolLog("[ERROR] jiraToolHandler (update_comment_task): issueKey, taskId, and completed are required.");
@@ -1592,6 +1679,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             
             let targetComment: JiraComment | null = null;
             let taskItemFound = false;
+            let taskText = "";
             
             // Step 2: Search through comments to find the one containing this taskItem
             for (const comment of comments) {
@@ -1599,6 +1687,10 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 // Recursively search ADF structure for taskItem with matching localId
                 function findTaskItem(node: AdfNode): boolean {
                   if (node.type === 'taskItem' && node.attrs?.localId === taskIdStr) {
+                    // Extract task text from taskItem content
+                    if (node.content) {
+                      taskText = extractTextFromTaskItem(node);
+                    }
                     return true;
                   }
                   if (node.content) {
@@ -1650,6 +1742,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
               };
             }
             
+            // Step 3.5: Append completion note if provided
+            if (completionNote && completionNote.trim()) {
+              appendCompletionNoteToADF(updatedBody, taskText || `Task ${taskIdStr}`, completionNote, completed);
+              appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Added completion note to comment`);
+            }
+            
             // Step 4: Update the comment via JIRA API
             const { baseUrl, email, apiToken } = getJiraEnv();
             const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
@@ -1682,8 +1780,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             
             appendJiraToolLog(`[SUCCESS] jiraToolHandler (update_comment_task): Successfully updated taskItem ${taskIdStr} to ${completed ? 'DONE' : 'TODO'}`);
             
+            const noteInfo = completionNote && completionNote.trim() 
+              ? `\n\n📝 **Completion Note Added:** ${completionNote}`
+              : (completed ? `\n\n💡 **Tip:** Consider including a completionNote parameter to document what was done for this task.` : '');
+            
             return {
-              markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${targetComment.id}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
+              markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${targetComment.id}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**${noteInfo}\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
               json: {
                 issueKey,
                 taskId: taskIdStr,
@@ -1691,7 +1793,8 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 commentId: targetComment.id,
                 updated: true,
                 method: "ADF taskItem API update",
-                newState: completed ? 'DONE' : 'TODO'
+                newState: completed ? 'DONE' : 'TODO',
+                completionNoteAdded: !!(completionNote && completionNote.trim())
               },
               url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
             };
@@ -1747,9 +1850,14 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 const updatedBody = JSON.parse(JSON.stringify(targetComment.body));
                 let updateCount = 0;
                 let taskItemFound = false;
+                let taskText = "";
                 
                 function findAndUpdateTaskItem(node: AdfNode): void {
                   if (node.type === 'taskItem' && node.attrs?.localId === localId) {
+                    // Extract task text before updating
+                    if (node.content) {
+                      taskText = extractTextFromTaskItem(node);
+                    }
                     node.attrs.state = completed ? 'DONE' : 'TODO';
                     updateCount++;
                     taskItemFound = true;
@@ -1769,6 +1877,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                     json: { error: "TaskItem not found in comment", localId, commentId, issueKey },
                     url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
                   };
+                }
+                
+                // Step 4.5: Append completion note if provided
+                if (completionNote && completionNote.trim()) {
+                  appendCompletionNoteToADF(updatedBody, taskText || `Task ${localId}`, completionNote, completed);
+                  appendJiraToolLog(`[INFO] jiraToolHandler (update_comment_task): Added completion note to comment`);
                 }
                 
                 // Step 5: Update the comment via JIRA API
@@ -1803,8 +1917,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 
                 appendJiraToolLog(`[SUCCESS] jiraToolHandler (update_comment_task): Successfully updated ADF taskItem ${localId} to ${completed ? 'DONE' : 'TODO'}`);
                 
+                const noteInfo = completionNote && completionNote.trim() 
+                  ? `\n\n📝 **Completion Note Added:** ${completionNote}`
+                  : (completed ? `\n\n💡 **Tip:** Consider including a completionNote parameter to document what was done for this task.` : '');
+                
                 return {
-                  markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${commentId}\n**Local ID:** ${localId}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
+                  markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${commentId}\n**Local ID:** ${localId}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**${noteInfo}\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
                   json: {
                     issueKey,
                     taskId: taskIdStr,
@@ -1815,7 +1933,8 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                     updated: true,
                     commentId,
                     localId,
-                    newState: completed ? 'DONE' : 'TODO'
+                    newState: completed ? 'DONE' : 'TODO',
+                    completionNoteAdded: !!(completionNote && completionNote.trim())
                   },
                   url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
                 };

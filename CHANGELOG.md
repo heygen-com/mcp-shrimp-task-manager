@@ -2,7 +2,9 @@
 
 # Changelog
 
-## [Unreleased]
+All notable changes to this project will be documented in this file.
+
+## Unreleased
 
 ### Added
 - **GitHub PR Context Tool**: New tool to fetch comprehensive GitHub PR context
@@ -11,8 +13,9 @@
   - Supports authentication for private repositories via GITHUB_TOKEN
   - Provides raw data without recommendations or interpretations
   - Complements the existing `analyze_pr` tool by focusing on context rather than analysis
+- JIRA comment task completion notes - When marking JIRA comment tasks as complete, agents can now include a `completionNote` parameter to document what was done. The note appears as a visually distinct panel in the JIRA comment.
 
-## [1.0.14] - 2025-05-24
+## 1.0.14 - 2025-05-24
 
 ### Added
 - **Translation Memory Caching**: Translation tool now checks memory cache first before calling OpenAI
@@ -36,13 +39,13 @@
 - Better memory management by consolidating duplicate translations
 - More efficient storage by removing unnecessary dialog files
 
-## [1.0.13]
+## 1.0.13
 
 ### Fixed
 
 - Fix: Corrected issue with invariantlabs misjudgment (148f0cd)
 
-## [1.0.12]
+## 1.0.12
 
 ### Added
 
@@ -54,7 +57,7 @@
 
 - Removed unnecessary error log outputs in multiple places to avoid Cursor errors. (552eed8)
 
-## [1.0.11]
+## 1.0.11
 
 ### Changed
 
@@ -64,7 +67,7 @@
 
 - Fix: Resolved issue with Chinese character support in Cursor Console. (00943e1)
 
-## [1.0.10]
+## 1.0.10
 
 ### Changed
 
@@ -85,7 +88,7 @@
 - Fixed an issue where some models might not follow the process correctly. (ffd6349)
 - Fix #6: Corrected an issue where simplified/traditional Chinese caused Enum parameter validation errors. (dae3756)
 
-## [1.0.8]
+## 1.0.8
 
 ### Added
 
@@ -104,7 +107,7 @@
 - Fixed issue #5 where some Agents couldn't properly handle errors
 - Fixed line formatting in template documents for better readability
 
-## [1.0.7]
+## 1.0.7
 
 ### Added
 
