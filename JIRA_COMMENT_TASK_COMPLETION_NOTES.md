@@ -24,7 +24,6 @@ When using the `update_comment_task` action with the JIRA tool, agents can inclu
 ## Visual Appearance
 
 The completion note is added to the JIRA comment as a visually distinct panel:
-
 - **Success Panel** (green) - When marking a task complete
 - **Info Panel** (blue) - When reopening a task
 
@@ -72,3 +71,15 @@ Method: Updated ADF taskItem via JIRA API
 - It appears as a panel element below the original comment content
 - The original comment structure is preserved
 - Works with both UUID format task IDs and `adf_` prefixed task IDs 
+
+## JIRA Formatting Note (Wiki Markup)
+
+**Important:** JIRA uses its own **Wiki Markup** for formatting text, not standard Markdown. If you use Markdown syntax (like `##` for headers or `**bold**`), it will appear as plain text in JIRA comments and descriptions.
+
+For richly formatted comments, please use JIRA's syntax.
+
+- For **bold** text, use `*bold text*`.
+- For _italic_ text, use `_italic text_`.
+- For lists, start a line with `*` (for bulleted) or `#` (for numbered).
+
+For a complete guide, please see the [JIRA Text Formatting Notation Guide](https://jira.slac.stanford.edu/secure/WikiRendererHelpAction.jspa?section=all). 

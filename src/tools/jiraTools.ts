@@ -14,6 +14,7 @@ import {
   JiraCommentUpdateRequest 
 } from "./jira/jiraCommentService.js";
 import { getJiraCredentials, getCredentialSource } from "../utils/jiraCredentials.js";
+import { convertMarkdownToJiraWikiMarkup } from "../utils/markupConverter.js";
 
 // Basic JIRA Interfaces for improved type safety
 interface JiraUser {
@@ -367,16 +368,20 @@ function toADF(text: string, metadata?: Record<string, unknown>): unknown {
 }
 
 // Helper to create a JIRA ticket via API
-async function createJiraTicket(input: JiraToolInput): Promise<unknown> {
+async function createJiraTicket(
+  projectKey: string, 
+  summary: string, 
+  description: unknown, 
+  labels: string[] | undefined, 
+): Promise<unknown> {
   const { baseUrl, email, apiToken } = getJiraEnv();
-  const { projectKey, summary, description, labels, metadata } = input.context;
   const url = `${baseUrl}/rest/api/3/issue`;
   const auth = Buffer.from(`${email}:${apiToken}`).toString("base64");
   const body = {
     fields: {
       project: { key: projectKey },
       summary: summary || "No summary provided",
-      description: toADF(description || "No description provided", metadata),
+      description,
       issuetype: { name: "Task" },
       labels: labels || [],
     },
@@ -975,8 +980,16 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
             url: exists.url as string,
           };
         }
+        
+        const [, convertedDescription] = convertAndNotify({ markdown: '', json: {} }, input.context.description);
+        
         // 2. Create ticket via JIRA API
-        const jiraRes = await createJiraTicket(input) as Record<string, unknown>;
+        const jiraRes = await createJiraTicket(
+          projectKey || "", 
+          summary || "No summary provided", 
+          toADF(convertedDescription || "No description provided", input.context.metadata), 
+          input.context.labels
+        ) as Record<string, unknown>;
         const ticketKey = jiraRes.key as string;
         const ticketUrl = `${process.env.JIRA_BASE_URL}/browse/${ticketKey}`;
         // 3. Store metadata in local file
@@ -992,11 +1005,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         localTickets.push(newTicket);
         await writeLocalJiraTickets(projectKey || "", localTickets);
         // 4. Return markdown, JSON, and URL
-        return {
+        const [result] = convertAndNotify({
           markdown: `# Ticket Created\n\nSummary: ${newTicket.summary}\n\n[View in JIRA](${newTicket.url})`,
           json: newTicket,
           url: newTicket.url,
-        };
+        }, input.context.description);
+        return result;
       }
       break;
     case "create_comment": {
@@ -1030,11 +1044,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         
         if (result.success && result.data) {
           const markdown = jiraCommentService.formatCommentForDisplay(result.data);
-          return {
+          const [toolResult] = convertAndNotify({
             markdown: `# ✅ Comment Created Successfully\n\n${markdown}`,
             json: result.data,
             url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
-          };
+          }, typeof body === 'string' ? body : JSON.stringify(body));
+          return toolResult;
         } else {
           return {
             markdown: `❌ Error creating comment: ${result.error}`,
@@ -1136,11 +1151,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
         
         if (result.success && result.data) {
           const markdown = jiraCommentService.formatCommentForDisplay(result.data);
-          return {
+          const [toolResult] = convertAndNotify({
             markdown: `# ✅ Comment Updated Successfully\n\n${markdown}`,
             json: result.data,
             url: jiraCommentService.getCommentUrl(issueKey, result.data.id || "")
-          };
+          }, typeof body === 'string' ? body : JSON.stringify(body));
+          return toolResult;
         } else {
           return {
             markdown: `❌ Error updating comment: ${result.error}`,
@@ -1387,7 +1403,8 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           fieldsToUpdate.summary = summary;
         }
         if (description) {
-          fieldsToUpdate.description = toADF(description, input.context.metadata);
+          const [, convertedDescription] = convertAndNotify({ markdown: '', json: {} }, description);
+          fieldsToUpdate.description = toADF(convertedDescription || "No description provided", input.context.metadata);
         }
         if (labels && Array.isArray(labels)) {
           fieldsToUpdate.labels = labels;
@@ -1417,11 +1434,12 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
           const ticketUrl = `${getJiraEnv().baseUrl}/browse/${updatedTicketData.key}`;
           const markdownSummary = formatJiraTicketToMarkdown(updatedTicketData);
 
-          return {
+          const [result] = convertAndNotify({
             markdown: `# ✅ JIRA Ticket ${issueKey} Updated\n\n${markdownSummary}`,
             json: updatedTicketData,
             url: ticketUrl,
-          };
+          }, description);
+          return result;
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
           appendJiraToolLog(`[ERROR] jiraToolHandler (update/ticket): Failed to update ${issueKey}: ${errorMsg}`);
@@ -1784,7 +1802,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
               ? `\n\n📝 **Completion Note Added:** ${completionNote}`
               : (completed ? `\n\n💡 **Tip:** Consider including a completionNote parameter to document what was done for this task.` : '');
             
-            return {
+            const [result] = convertAndNotify({
               markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${targetComment.id}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**${noteInfo}\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
               json: {
                 issueKey,
@@ -1797,7 +1815,8 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                 completionNoteAdded: !!(completionNote && completionNote.trim())
               },
               url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
-            };
+            }, completionNote, true);
+            return result;
           }
           // Handle our generated task ID formats (existing logic for ct_ and adf_ prefixes)
           else {
@@ -1921,7 +1940,7 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                   ? `\n\n📝 **Completion Note Added:** ${completionNote}`
                   : (completed ? `\n\n💡 **Tip:** Consider including a completionNote parameter to document what was done for this task.` : '');
                 
-                return {
+                const [result] = convertAndNotify({
                   markdown: `# ✅ Comment Task Successfully Updated\n\n**Issue:** ${issueKey}\n**Task ID:** ${taskIdStr}\n**Status:** ${completed ? 'Completed ✓' : 'Reopened ○'}\n**Comment:** ${commentId}\n**Local ID:** ${localId}\n**Method:** Updated ADF taskItem via JIRA API\n\n🎯 **Task has been ${completed ? 'marked as complete' : 'reopened'} in the JIRA comment.**${noteInfo}\n\n[View updated comment in JIRA](${getJiraEnv().baseUrl}/browse/${issueKey})`,
                   json: {
                     issueKey,
@@ -1937,7 +1956,8 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
                     completionNoteAdded: !!(completionNote && completionNote.trim())
                   },
                   url: `${getJiraEnv().baseUrl}/browse/${issueKey}`,
-                };
+                }, completionNote, true);
+                return result;
               }
             }
             // Check if it's our generated text task ID: ct_{commentId}_{line}_{hash}
@@ -2070,7 +2090,43 @@ export async function jiraToolHandler(input: JiraToolInput): Promise<JiraToolRes
   };
 }
 
+function convertAndNotify(
+  result: JiraToolResult, 
+  text: string | undefined | Record<string, unknown>,
+  isCompletionNote: boolean = false
+): [JiraToolResult, string | undefined] {
+    let convertedText: string | undefined;
+
+    if (typeof text === 'string' && containsMarkdown(text)) {
+        convertedText = convertMarkdownToJiraWikiMarkup(text);
+        if (isCompletionNote) {
+           // Don't add a warning for completion notes, just convert them
+        } else {
+           result.markdown += `\n\n---\n✅ **Note:** Your Markdown has been automatically converted to JIRA's Wiki Markup. [Learn More](https://jira.slac.stanford.edu/secure/WikiRendererHelpAction.jspa?section=all)`;
+        }
+    } else if (typeof text === 'string') {
+        convertedText = text;
+    }
+
+    return [result, convertedText];
+}
+
 // Integration points:
 // - Call this handler from project tools, passing project context
 // - Store/read JIRA ticket metadata in data/projects/{project}/jira-tickets.json
 // - Use prompt templates in src/prompts/templates_en/tools/jira/ (to be created) 
+
+// Helper to detect common markdown syntax
+function containsMarkdown(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  // Regex to detect common markdown patterns:
+  // - Headers (##)
+  // - Bold (**text**)
+  // - Links ([text](url))
+  // - Unordered lists (* item)
+  // - Inline code (`code`)
+  const markdownRegex = /(^#{2,6}\s|\*\*[^*]+\*\*|\[.+\]\(.+\)|^\s*[-*+]\s.+|`[^`]+`)/m;
+  return markdownRegex.test(text);
+}
