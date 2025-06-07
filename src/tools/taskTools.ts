@@ -23,8 +23,8 @@ import {
 } from "../types/index.js";
 import {
   generateTaskSummary,
-} from "../utils/summaryExtractor.js";
-import { loadTaskRelatedFiles } from "../utils/fileLoader.js";
+} from "../../utils/summaryExtractor.js";
+import { loadTaskRelatedFiles } from "../../utils/fileLoader.js";
 import { onTaskComplete } from './memory/triggers.js';
 // 導入prompt生成器
 import {

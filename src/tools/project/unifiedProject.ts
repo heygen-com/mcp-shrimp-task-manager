@@ -499,7 +499,7 @@ export async function project(params: z.infer<typeof projectSchema>) {
 
             markdown += `\n## 📜 JIRA Epic History (${issueKey})\n`;
             try {
-              const { jiraToolHandler } = await import("../jiraTools.js");
+              const { jiraToolHandler } = await import("../jira/jiraTools.js");
               // Fetch all pages of history for accurate diffing for now. 
               // Consider pagination for display if needed, but for diffing, all data is better.
               const historyResult = await jiraToolHandler({
@@ -536,9 +536,9 @@ export async function project(params: z.infer<typeof projectSchema>) {
                 markdown += newUpdatesSummary;
 
                 // Call the formatter with the set of new entry IDs
-                const { formatChangelogToTimelineMarkdown } = await import("../jiraTools.js"); 
+                const { formatChangelogToTimelineMarkdown } = await import("../jira/jiraTools.js");
                 // This assumes formatChangelogToTimelineMarkdown is also exported from jiraTools.ts
-                const historyMarkdown = formatChangelogToTimelineMarkdown(issueKey, historyResult.json as import("../jiraTools.js").JiraChangelog, newEntryIds);
+                const historyMarkdown = formatChangelogToTimelineMarkdown(issueKey, historyResult.json as import("../jira/jiraTools.js").JiraChangelog, newEntryIds);
                 markdown += historyMarkdown.replace(/^#.*\n\n/, ''); // Remove default header
                 
                 // Update sync metadata
@@ -618,7 +618,7 @@ export async function project(params: z.infer<typeof projectSchema>) {
       case "list_jira_projects": {
         try {
           // Import jiraToolHandler dynamically to avoid circular dependencies
-          const { jiraToolHandler } = await import("../jiraTools.js");
+          const { jiraToolHandler } = await import("../jira/jiraTools.js");
           
           // Call JIRA API to get all projects
           const result = await jiraToolHandler({
@@ -659,7 +659,7 @@ export async function project(params: z.infer<typeof projectSchema>) {
           const epicUrl = `${baseUrl}/browse/${issueKey}`;
           
           // Import the updateJiraIssueLabels function dynamically
-          const { updateJiraIssueLabels } = await import("../jiraTools.js");
+          const { updateJiraIssueLabels } = await import("../jira/jiraTools.js");
           
           // Update the JIRA epic with the project ID as a label
           let jiraUpdateSuccess = true;

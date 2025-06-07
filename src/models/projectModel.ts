@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
 import { getAllTasks, createTask, updateTask } from "./taskModel.js";
 import { Task, TaskStatus } from "../types/index.js";
-import { generateProjectId, ensureUniqueProjectId, generateContextId, generateInsightId } from "../utils/idGenerator.js";
+import { generateProjectId, ensureUniqueProjectId, generateContextId, generateInsightId } from "../../utils/idGenerator.js";
 
 // Get project root path
 const __filename = fileURLToPath(import.meta.url);

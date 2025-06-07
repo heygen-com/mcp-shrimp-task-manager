@@ -106,7 +106,7 @@ import { logDataDir, logDataDirSchema, checkEnv, checkEnvSchema } from "./tools/
 import { checkpoint, checkpointSchema } from "./tools/checkpoint/checkpointTool.js";
 import { pullRequest, pullRequestSchema } from "./tools/pr/prAnalysisTools.js";
 import { architectureSnapshot, architectureSnapshotSchema } from "./tools/architecture/architectureSnapshotTool.js";
-import { JiraToolSchema, jiraToolHandler, JiraToolInput } from "./tools/jiraTools.js";
+import { JiraToolSchema, jiraToolHandler, JiraToolInput } from "./tools/jira/jiraTools.js";
 import { researchMode, researchModeSchema } from './tools/research/researchMode.js';
 import { recordToolUsage, ToolCallParams } from './utils/toolUsageTracker.js';
 
