@@ -1,0 +1,17 @@
+{
+  "id": "12345",
+  "key": "TEST-123",
+  "fields": {
+    "summary": "Test ticket",
+    "description": "This is a test ticket",
+    "status": {
+      "name": "To Do"
+    },
+    "assignee": {
+      "accountId": "test-user-123",
+      "displayName": "Test User"
+    },
+    "created": "2024-03-20T10:00:00.000Z",
+    "updated": "2024-03-20T10:00:00.000Z"
+  }
+} 
