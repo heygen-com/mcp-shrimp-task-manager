@@ -25,5 +25,18 @@ export default {
   testMatch: [
     "**/__tests__/**/*.ts",
     "**/?(*.)+(spec|test).ts"
+  ],
+  reporters: [
+    "default",
+    ["jest-summary-reporter", {
+      "failuresOnly": false,
+      "summary": true,
+      "symbols": {
+        "pass": "🟢",
+        "fail": "🔴",
+        "skip": "⚪"
+      },
+      "showSummaryAfterErrorList": true
+    }]
   ]
 };
