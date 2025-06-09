@@ -3,27 +3,22 @@ export default {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: "node",
   extensionsToTreatAsEsm: ['.ts'],
-  globals: {
-    'ts-jest': {
-      tsconfig: {
-        isolatedModules: true,
-      },
-      useESM: true,
-    },
-  },
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       useESM: true,
+      tsconfig: {
+        isolatedModules: true,
+      },
     }],
   },
   transformIgnorePatterns: [
     'node_modules/(?!(node-fetch)/)'
   ],
   testMatch: [
-    "**/__tests__/**/*.ts",
-    "**/?(*.)+(spec|test).ts"
+    "**/test/unit/**/*.test.ts",
+    "**/test/integration/**/*.test.ts",
   ]
 };

@@ -1,31 +1,497 @@
 {
-  "projectIndex": {},
+  "projectIndex": {
+    "project1": [
+      "mem_1749512300998_6y2rmofd5",
+      "mem_1749512300999_a4v8v5840",
+      "mem_1749512301053_owqulq0i8",
+      "mem_1749512358078_d9v02y7m7",
+      "mem_1749512358079_cur0n5dxa",
+      "mem_1749512358131_jbp2c1qw7",
+      "mem_1749512488332_muzcpqot1",
+      "mem_1749512488333_2ll8iuo2l",
+      "mem_1749512488382_h0ifaucp1"
+    ],
+    "project2": [
+      "mem_1749512301000_5x13nosvm",
+      "mem_1749512358081_4ibkp5vj6",
+      "mem_1749512488334_w63t3o1fb"
+    ]
+  },
   "typeIndex": {
     "breakthrough": [
-      "mem_1748690658535_ir8ift9sh"
+      "mem_1749512300989_mowfq5z96",
+      "mem_1749512300998_6y2rmofd5",
+      "mem_1749512301000_5x13nosvm",
+      "mem_1749512301014_fkt8vxlfe",
+      "mem_1749512301029_b0o80bau4",
+      "mem_1749512301034_scyskxukf",
+      "mem_1749512301037_2y64xrxai",
+      "mem_1749512358068_ph8pckcsm",
+      "mem_1749512358078_d9v02y7m7",
+      "mem_1749512358081_4ibkp5vj6",
+      "mem_1749512358086_yl147icfa",
+      "mem_1749512358105_9o5qkfql4",
+      "mem_1749512358108_qby30fs61",
+      "mem_1749512358111_fatjqz551",
+      "mem_1749512488316_3nvi14p93",
+      "mem_1749512488332_muzcpqot1",
+      "mem_1749512488334_w63t3o1fb",
+      "mem_1749512488343_08qld74m1",
+      "mem_1749512488353_t76w4ig22",
+      "mem_1749512488359_zj7y02lin",
+      "mem_1749512488361_yw9d9e8dd"
     ],
-    "decision": [],
-    "feedback": [],
-    "error_recovery": [],
+    "decision": [
+      "mem_1749512300993_j29u9ziq9",
+      "mem_1749512300999_a4v8v5840",
+      "mem_1749512301027_o1gmpqtiw",
+      "mem_1749512301029_0jxu7ns9p",
+      "mem_1749512301038_tc9oe0632",
+      "mem_1749512301053_owqulq0i8",
+      "mem_1749512358073_m289cbm7k",
+      "mem_1749512358079_cur0n5dxa",
+      "mem_1749512358102_lki1r8927",
+      "mem_1749512358104_ll5ze6rui",
+      "mem_1749512358112_dekpp8cj6",
+      "mem_1749512358131_jbp2c1qw7",
+      "mem_1749512488327_83r2uzxeq",
+      "mem_1749512488333_2ll8iuo2l",
+      "mem_1749512488351_03tosb6yp",
+      "mem_1749512488352_396jo7h6l",
+      "mem_1749512488361_rsfv4fxmp",
+      "mem_1749512488382_h0ifaucp1"
+    ],
+    "feedback": [
+      "mem_1749512300995_uvdex7zxa",
+      "mem_1749512358075_5di0uvt3y",
+      "mem_1749512488329_5z97932pw"
+    ],
+    "error_recovery": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512301031_nvgxw2s86",
+      "mem_1749512301032_embxnjnfg",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512358106_a9xrnxk0p",
+      "mem_1749512358107_5tam5sdho",
+      "mem_1749512488347_zfdiocrbr",
+      "mem_1749512488355_vz3g1aqgz",
+      "mem_1749512488357_qbm6h4yv4"
+    ],
     "pattern": [],
     "user_preference": []
   },
   "tagIndex": {
     "test": [
-      "mem_1748690658535_ir8ift9sh"
+      "mem_1749512300989_mowfq5z96",
+      "mem_1749512301053_owqulq0i8",
+      "mem_1749512358068_ph8pckcsm",
+      "mem_1749512358131_jbp2c1qw7",
+      "mem_1749512488316_3nvi14p93",
+      "mem_1749512488382_h0ifaucp1"
     ],
-    "unified-memory": [
-      "mem_1748690658535_ir8ift9sh"
+    "unit-test": [
+      "mem_1749512300989_mowfq5z96",
+      "mem_1749512358068_ph8pckcsm",
+      "mem_1749512488316_3nvi14p93"
+    ],
+    "original": [
+      "mem_1749512300995_uvdex7zxa",
+      "mem_1749512358075_5di0uvt3y",
+      "mem_1749512488329_5z97932pw"
+    ],
+    "updated": [
+      "mem_1749512300995_uvdex7zxa",
+      "mem_1749512358075_5di0uvt3y",
+      "mem_1749512488329_5z97932pw"
+    ],
+    "javascript": [
+      "mem_1749512300998_6y2rmofd5",
+      "mem_1749512358078_d9v02y7m7",
+      "mem_1749512488332_muzcpqot1"
+    ],
+    "typescript": [
+      "mem_1749512300999_a4v8v5840",
+      "mem_1749512358079_cur0n5dxa",
+      "mem_1749512488333_2ll8iuo2l"
+    ],
+    "python": [
+      "mem_1749512301000_5x13nosvm",
+      "mem_1749512358081_4ibkp5vj6",
+      "mem_1749512488334_w63t3o1fb"
+    ],
+    "performance": [
+      "mem_1749512301014_fkt8vxlfe",
+      "mem_1749512358086_yl147icfa",
+      "mem_1749512488343_08qld74m1"
+    ],
+    "caching": [
+      "mem_1749512301014_fkt8vxlfe",
+      "mem_1749512358086_yl147icfa",
+      "mem_1749512488343_08qld74m1"
+    ],
+    "bug-fix": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "auth": [
+      "mem_1749512301027_o1gmpqtiw",
+      "mem_1749512301029_0jxu7ns9p",
+      "mem_1749512301029_b0o80bau4",
+      "mem_1749512358102_lki1r8927",
+      "mem_1749512358104_ll5ze6rui",
+      "mem_1749512358105_9o5qkfql4",
+      "mem_1749512488351_03tosb6yp",
+      "mem_1749512488352_396jo7h6l",
+      "mem_1749512488353_t76w4ig22"
+    ],
+    "security": [
+      "mem_1749512301027_o1gmpqtiw",
+      "mem_1749512301029_b0o80bau4",
+      "mem_1749512358102_lki1r8927",
+      "mem_1749512358105_9o5qkfql4",
+      "mem_1749512488351_03tosb6yp",
+      "mem_1749512488353_t76w4ig22"
+    ],
+    "jwt": [
+      "mem_1749512301029_0jxu7ns9p",
+      "mem_1749512301029_b0o80bau4",
+      "mem_1749512358104_ll5ze6rui",
+      "mem_1749512358105_9o5qkfql4",
+      "mem_1749512488352_396jo7h6l",
+      "mem_1749512488353_t76w4ig22"
+    ],
+    "bug": [
+      "mem_1749512301031_nvgxw2s86",
+      "mem_1749512301032_embxnjnfg",
+      "mem_1749512358106_a9xrnxk0p",
+      "mem_1749512358107_5tam5sdho",
+      "mem_1749512488355_vz3g1aqgz",
+      "mem_1749512488357_qbm6h4yv4"
+    ],
+    "npe": [
+      "mem_1749512301031_nvgxw2s86",
+      "mem_1749512358106_a9xrnxk0p",
+      "mem_1749512488355_vz3g1aqgz"
+    ],
+    "error": [
+      "mem_1749512301032_embxnjnfg",
+      "mem_1749512358107_5tam5sdho",
+      "mem_1749512488357_qbm6h4yv4"
+    ],
+    "old": [
+      "mem_1749512301034_scyskxukf",
+      "mem_1749512301038_tc9oe0632",
+      "mem_1749512358108_qby30fs61",
+      "mem_1749512358112_dekpp8cj6",
+      "mem_1749512488359_zj7y02lin",
+      "mem_1749512488361_rsfv4fxmp"
+    ],
+    "recent": [
+      "mem_1749512301037_2y64xrxai",
+      "mem_1749512358111_fatjqz551",
+      "mem_1749512488361_yw9d9e8dd"
     ]
   },
-  "entityIndex": {},
+  "entityIndex": {
+    "testFunction": [
+      "mem_1749512300989_mowfq5z96",
+      "mem_1749512358068_ph8pckcsm",
+      "mem_1749512488316_3nvi14p93"
+    ],
+    "testFile.ts": [
+      "mem_1749512300989_mowfq5z96",
+      "mem_1749512358068_ph8pckcsm",
+      "mem_1749512488316_3nvi14p93"
+    ],
+    "userController.ts": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "Fixed": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "userController": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "getUserById": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "Referenced": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ],
+    "@company/auth-utils": [
+      "mem_1749512301024_zmy1wh3c9",
+      "mem_1749512358091_xr885w55r",
+      "mem_1749512488347_zfdiocrbr"
+    ]
+  },
   "temporalIndex": [
     {
-      "id": "mem_1748690658535_ir8ift9sh",
-      "timestamp": "2025-05-31T11:24:18.535Z"
+      "id": "mem_1749512488382_h0ifaucp1",
+      "timestamp": "2025-06-09T23:41:28.382Z"
+    },
+    {
+      "id": "mem_1749512488361_yw9d9e8dd",
+      "timestamp": "2025-06-09T23:41:28.361Z"
+    },
+    {
+      "id": "mem_1749512488361_rsfv4fxmp",
+      "timestamp": "2025-06-09T23:41:28.361Z"
+    },
+    {
+      "id": "mem_1749512488357_qbm6h4yv4",
+      "timestamp": "2025-06-09T23:41:28.357Z"
+    },
+    {
+      "id": "mem_1749512488355_vz3g1aqgz",
+      "timestamp": "2025-06-09T23:41:28.355Z"
+    },
+    {
+      "id": "mem_1749512488353_t76w4ig22",
+      "timestamp": "2025-06-09T23:41:28.353Z"
+    },
+    {
+      "id": "mem_1749512488352_396jo7h6l",
+      "timestamp": "2025-06-09T23:41:28.352Z"
+    },
+    {
+      "id": "mem_1749512488351_03tosb6yp",
+      "timestamp": "2025-06-09T23:41:28.351Z"
+    },
+    {
+      "id": "mem_1749512488347_zfdiocrbr",
+      "timestamp": "2025-06-09T23:41:28.347Z"
+    },
+    {
+      "id": "mem_1749512488343_08qld74m1",
+      "timestamp": "2025-06-09T23:41:28.343Z"
+    },
+    {
+      "id": "mem_1749512488334_w63t3o1fb",
+      "timestamp": "2025-06-09T23:41:28.334Z"
+    },
+    {
+      "id": "mem_1749512488333_2ll8iuo2l",
+      "timestamp": "2025-06-09T23:41:28.333Z"
+    },
+    {
+      "id": "mem_1749512488332_muzcpqot1",
+      "timestamp": "2025-06-09T23:41:28.332Z"
+    },
+    {
+      "id": "mem_1749512488329_5z97932pw",
+      "timestamp": "2025-06-09T23:41:28.329Z"
+    },
+    {
+      "id": "mem_1749512488327_83r2uzxeq",
+      "timestamp": "2025-06-09T23:41:28.327Z"
+    },
+    {
+      "id": "mem_1749512488316_3nvi14p93",
+      "timestamp": "2025-06-09T23:41:28.316Z"
+    },
+    {
+      "id": "mem_1749512358131_jbp2c1qw7",
+      "timestamp": "2025-06-09T23:39:18.131Z"
+    },
+    {
+      "id": "mem_1749512358112_dekpp8cj6",
+      "timestamp": "2025-06-09T23:39:18.112Z"
+    },
+    {
+      "id": "mem_1749512358111_fatjqz551",
+      "timestamp": "2025-06-09T23:39:18.111Z"
+    },
+    {
+      "id": "mem_1749512358107_5tam5sdho",
+      "timestamp": "2025-06-09T23:39:18.107Z"
+    },
+    {
+      "id": "mem_1749512358106_a9xrnxk0p",
+      "timestamp": "2025-06-09T23:39:18.106Z"
+    },
+    {
+      "id": "mem_1749512358105_9o5qkfql4",
+      "timestamp": "2025-06-09T23:39:18.105Z"
+    },
+    {
+      "id": "mem_1749512358104_ll5ze6rui",
+      "timestamp": "2025-06-09T23:39:18.104Z"
+    },
+    {
+      "id": "mem_1749512358102_lki1r8927",
+      "timestamp": "2025-06-09T23:39:18.102Z"
+    },
+    {
+      "id": "mem_1749512358091_xr885w55r",
+      "timestamp": "2025-06-09T23:39:18.091Z"
+    },
+    {
+      "id": "mem_1749512358086_yl147icfa",
+      "timestamp": "2025-06-09T23:39:18.086Z"
+    },
+    {
+      "id": "mem_1749512358081_4ibkp5vj6",
+      "timestamp": "2025-06-09T23:39:18.081Z"
+    },
+    {
+      "id": "mem_1749512358079_cur0n5dxa",
+      "timestamp": "2025-06-09T23:39:18.079Z"
+    },
+    {
+      "id": "mem_1749512358078_d9v02y7m7",
+      "timestamp": "2025-06-09T23:39:18.078Z"
+    },
+    {
+      "id": "mem_1749512358075_5di0uvt3y",
+      "timestamp": "2025-06-09T23:39:18.075Z"
+    },
+    {
+      "id": "mem_1749512358073_m289cbm7k",
+      "timestamp": "2025-06-09T23:39:18.073Z"
+    },
+    {
+      "id": "mem_1749512358068_ph8pckcsm",
+      "timestamp": "2025-06-09T23:39:18.068Z"
+    },
+    {
+      "id": "mem_1749512301053_owqulq0i8",
+      "timestamp": "2025-06-09T23:38:21.053Z"
+    },
+    {
+      "id": "mem_1749512301038_tc9oe0632",
+      "timestamp": "2025-06-09T23:38:21.038Z"
+    },
+    {
+      "id": "mem_1749512301037_2y64xrxai",
+      "timestamp": "2025-06-09T23:38:21.037Z"
+    },
+    {
+      "id": "mem_1749512301032_embxnjnfg",
+      "timestamp": "2025-06-09T23:38:21.032Z"
+    },
+    {
+      "id": "mem_1749512301031_nvgxw2s86",
+      "timestamp": "2025-06-09T23:38:21.031Z"
+    },
+    {
+      "id": "mem_1749512301029_0jxu7ns9p",
+      "timestamp": "2025-06-09T23:38:21.029Z"
+    },
+    {
+      "id": "mem_1749512301029_b0o80bau4",
+      "timestamp": "2025-06-09T23:38:21.029Z"
+    },
+    {
+      "id": "mem_1749512301027_o1gmpqtiw",
+      "timestamp": "2025-06-09T23:38:21.027Z"
+    },
+    {
+      "id": "mem_1749512301024_zmy1wh3c9",
+      "timestamp": "2025-06-09T23:38:21.024Z"
+    },
+    {
+      "id": "mem_1749512301014_fkt8vxlfe",
+      "timestamp": "2025-06-09T23:38:21.014Z"
+    },
+    {
+      "id": "mem_1749512301000_5x13nosvm",
+      "timestamp": "2025-06-09T23:38:21.000Z"
+    },
+    {
+      "id": "mem_1749512300999_a4v8v5840",
+      "timestamp": "2025-06-09T23:38:20.999Z"
+    },
+    {
+      "id": "mem_1749512300998_6y2rmofd5",
+      "timestamp": "2025-06-09T23:38:20.998Z"
+    },
+    {
+      "id": "mem_1749512300995_uvdex7zxa",
+      "timestamp": "2025-06-09T23:38:20.995Z"
+    },
+    {
+      "id": "mem_1749512300993_j29u9ziq9",
+      "timestamp": "2025-06-09T23:38:20.993Z"
+    },
+    {
+      "id": "mem_1749512300989_mowfq5z96",
+      "timestamp": "2025-06-09T23:38:20.989Z"
+    },
+    {
+      "id": "mem_1749512488359_zj7y02lin",
+      "timestamp": "2025-03-01T23:41:28.359Z"
+    },
+    {
+      "id": "mem_1749512358108_qby30fs61",
+      "timestamp": "2025-03-01T23:39:18.109Z"
+    },
+    {
+      "id": "mem_1749512301034_scyskxukf",
+      "timestamp": "2025-03-01T23:38:21.035Z"
     }
   ],
   "fileIndex": {
-    "mem_1748690658535_ir8ift9sh": "memory_20250531042418.json"
+    "mem_1749512300989_mowfq5z96": "memory_20250609163820.json",
+    "mem_1749512300993_j29u9ziq9": "memory_20250609163820.json",
+    "mem_1749512300995_uvdex7zxa": "memory_20250609163820.json",
+    "mem_1749512300998_6y2rmofd5": "memory_20250609163820.json",
+    "mem_1749512300999_a4v8v5840": "memory_20250609163820.json",
+    "mem_1749512301000_5x13nosvm": "memory_20250609163821.json",
+    "mem_1749512301014_fkt8vxlfe": "memory_20250609163821.json",
+    "mem_1749512301024_zmy1wh3c9": "memory_20250609163821.json",
+    "mem_1749512301027_o1gmpqtiw": "memory_20250609163821.json",
+    "mem_1749512301029_0jxu7ns9p": "memory_20250609163821.json",
+    "mem_1749512301029_b0o80bau4": "memory_20250609163821.json",
+    "mem_1749512301031_nvgxw2s86": "memory_20250609163821.json",
+    "mem_1749512301032_embxnjnfg": "memory_20250609163821.json",
+    "mem_1749512301034_scyskxukf": "memory_20250609163821.json",
+    "mem_1749512301037_2y64xrxai": "memory_20250609163821.json",
+    "mem_1749512301038_tc9oe0632": "memory_20250609163821.json",
+    "mem_1749512301053_owqulq0i8": "memory_20250609163821.json",
+    "mem_1749512358068_ph8pckcsm": "memory_20250609163918.json",
+    "mem_1749512358073_m289cbm7k": "memory_20250609163918.json",
+    "mem_1749512358075_5di0uvt3y": "memory_20250609163918.json",
+    "mem_1749512358078_d9v02y7m7": "memory_20250609163918.json",
+    "mem_1749512358079_cur0n5dxa": "memory_20250609163918.json",
+    "mem_1749512358081_4ibkp5vj6": "memory_20250609163918.json",
+    "mem_1749512358086_yl147icfa": "memory_20250609163918.json",
+    "mem_1749512358091_xr885w55r": "memory_20250609163918.json",
+    "mem_1749512358102_lki1r8927": "memory_20250609163918.json",
+    "mem_1749512358104_ll5ze6rui": "memory_20250609163918.json",
+    "mem_1749512358105_9o5qkfql4": "memory_20250609163918.json",
+    "mem_1749512358106_a9xrnxk0p": "memory_20250609163918.json",
+    "mem_1749512358107_5tam5sdho": "memory_20250609163918.json",
+    "mem_1749512358108_qby30fs61": "memory_20250609163918.json",
+    "mem_1749512358111_fatjqz551": "memory_20250609163918.json",
+    "mem_1749512358112_dekpp8cj6": "memory_20250609163918.json",
+    "mem_1749512358131_jbp2c1qw7": "memory_20250609163918.json",
+    "mem_1749512488316_3nvi14p93": "memory_20250609164128.json",
+    "mem_1749512488327_83r2uzxeq": "memory_20250609164128.json",
+    "mem_1749512488329_5z97932pw": "memory_20250609164128.json",
+    "mem_1749512488332_muzcpqot1": "memory_20250609164128.json",
+    "mem_1749512488333_2ll8iuo2l": "memory_20250609164128.json",
+    "mem_1749512488334_w63t3o1fb": "memory_20250609164128.json",
+    "mem_1749512488343_08qld74m1": "memory_20250609164128.json",
+    "mem_1749512488347_zfdiocrbr": "memory_20250609164128.json",
+    "mem_1749512488351_03tosb6yp": "memory_20250609164128.json",
+    "mem_1749512488352_396jo7h6l": "memory_20250609164128.json",
+    "mem_1749512488353_t76w4ig22": "memory_20250609164128.json",
+    "mem_1749512488355_vz3g1aqgz": "memory_20250609164128.json",
+    "mem_1749512488357_qbm6h4yv4": "memory_20250609164128.json",
+    "mem_1749512488359_zj7y02lin": "memory_20250609164128.json",
+    "mem_1749512488361_yw9d9e8dd": "memory_20250609164128.json",
+    "mem_1749512488361_rsfv4fxmp": "memory_20250609164128.json",
+    "mem_1749512488382_h0ifaucp1": "memory_20250609164128.json"
   }
 }

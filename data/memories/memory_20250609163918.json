@@ -1,0 +1,22 @@
+{
+  "content": "Test 2",
+  "summary": "Test 2",
+  "type": "decision",
+  "confidence": 0.8,
+  "tags": [
+    "test"
+  ],
+  "projectId": "project1",
+  "relatedMemories": [],
+  "contextSnapshot": {},
+  "author": "test",
+  "metadata": {},
+  "id": "mem_1749512358131_jbp2c1qw7",
+  "version": 1,
+  "created": "2025-06-09T23:39:18.131Z",
+  "lastAccessed": "2025-06-09T23:39:18.131Z",
+  "accessCount": 0,
+  "relevanceScore": 1,
+  "archived": false
+}se
+}

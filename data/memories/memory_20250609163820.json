@@ -1,0 +1,21 @@
+{
+  "content": "Memory 2",
+  "summary": "Test 2",
+  "type": "decision",
+  "confidence": 0.8,
+  "tags": [
+    "typescript"
+  ],
+  "projectId": "project1",
+  "relatedMemories": [],
+  "contextSnapshot": {},
+  "author": "test",
+  "metadata": {},
+  "id": "mem_1749512300999_a4v8v5840",
+  "version": 1,
+  "created": "2025-06-09T23:38:20.999Z",
+  "lastAccessed": "2025-06-09T23:38:20.999Z",
+  "accessCount": 0,
+  "relevanceScore": 1,
+  "archived": false
+}
