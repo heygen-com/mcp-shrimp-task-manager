@@ -33,6 +33,9 @@ import {
 import { promises as fs } from 'fs';
 import path from 'path';
 
+// Store the actual data directory for cleanup
+const ACTUAL_DATA_DIR = path.join(process.cwd(), 'data', 'memories');
+
 describe('Memory System Tests', () => {
   
   beforeAll(async () => {
@@ -46,6 +49,39 @@ describe('Memory System Tests', () => {
       await fs.rm(TEST_DATA_DIR, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
+    }
+    
+    // Also clean up any memories that might have been created in the actual data directory
+    try {
+      const actualMemoryFiles = await fs.readdir(ACTUAL_DATA_DIR);
+      const testStartTime = Date.now() - 60000; // Files created in the last minute
+      
+      for (const file of actualMemoryFiles) {
+        if (file.startsWith('memory_') && file.endsWith('.json')) {
+          const filePath = path.join(ACTUAL_DATA_DIR, file);
+          const stats = await fs.stat(filePath);
+          
+          // Only delete files created during this test run (within last minute)
+          if (stats.mtimeMs > testStartTime) {
+            await fs.unlink(filePath);
+          }
+        }
+      }
+      
+      // Reset index and stats files to their git state
+      try {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        
+        // Reset _index.json and _stats.json to their git state
+        await execAsync('git checkout -- data/memories/_index.json data/memories/_stats.json');
+      } catch (error) {
+        console.log('Note: Could not reset index/stats files to git state:', error);
+      }
+    } catch (error) {
+      // Ignore cleanup errors - directory might not exist
+      console.log('Note: Could not clean up actual data directory:', error);
     }
   });
   
