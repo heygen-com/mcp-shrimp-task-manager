@@ -57,8 +57,8 @@ describe('JIRA Ticket Lifecycle Tests', () => {
     mockedRm.mockResolvedValue(undefined);
 
     // Configure node-fetch mock responses
-    mockedFetch.mockImplementation((url: any, init?: any) => {
-      const urlString = typeof url === 'string' ? url : url.toString();
+    mockedFetch.mockImplementation((url: Parameters<typeof nodeFetch.default>[0]) => {
+      const urlString = typeof url === 'string' ? url : url instanceof URL ? url.toString() : (url as { url: string }).url;
       
       // Mock project verification
       if (urlString.includes('/rest/api/3/project/TEST')) {
@@ -75,7 +75,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
             key: 'TEST', 
             name: 'Test Project' 
           }))
-        }) as any;
+        }) as unknown as ReturnType<typeof nodeFetch.default>;
       }
       
       // Mock issue type lookup for epic creation
@@ -91,7 +91,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
             { id: '10001', name: 'Epic', hierarchyLevel: 1 },
             { id: '10002', name: 'Task', hierarchyLevel: 0 }
           ]))
-        }) as any;
+        }) as unknown as ReturnType<typeof nodeFetch.default>;
       }
       
       // Mock issue creation
@@ -109,7 +109,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
             key: 'TEST-101', 
             self: 'https://test.atlassian.net/rest/api/3/issue/10001' 
           }))
-        }) as any;
+        }) as unknown as ReturnType<typeof nodeFetch.default>;
       }
       
       // Mock search
@@ -129,7 +129,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
               { key: 'TEST-101', fields: { summary: 'Test ticket 2', status: { name: 'In Progress' }, project: { key: 'TEST' } } }
             ] 
           }))
-        }) as any;
+        }) as unknown as ReturnType<typeof nodeFetch.default>;
       }
       
       // Default 404
@@ -138,7 +138,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
         status: 404,
         json: () => Promise.resolve({ error: 'URL not mocked' }),
         text: () => Promise.resolve(JSON.stringify({ error: 'URL not mocked' }))
-      }) as any;
+      }) as unknown as ReturnType<typeof nodeFetch.default>;
     });
   });
 
@@ -278,7 +278,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
           body: JSON.stringify(expectedBody)
         });
 
-        expect(mockedFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
+        expect(mockedFetch).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({}));
       } catch (error) {
         // Expected until update is implemented
         expect(error).toBeDefined();
@@ -312,7 +312,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
           }
         });
 
-        expect(mockedFetch).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
+        expect(mockedFetch).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({}));
       } catch (error) {
         // Expected until delete is implemented
         expect(error).toBeDefined();
@@ -333,7 +333,7 @@ describe('JIRA Ticket Lifecycle Tests', () => {
       // Verify JQL query - the actual call includes ORDER BY and fields parameters
       expect(mockedFetch).toHaveBeenCalledWith(
         'https://test.atlassian.net/rest/api/3/search?jql=project%20%3D%20TEST%20AND%20assignee%20%3D%20currentUser()%20ORDER%20BY%20created%20DESC&fields=key,summary,status,project',
-        expect.any(Object)
+        expect.objectContaining({})
       );
 
       // Verify response

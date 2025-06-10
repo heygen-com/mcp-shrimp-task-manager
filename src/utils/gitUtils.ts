@@ -1,5 +1,3 @@
-import { spawn } from "child_process";
-
 /**
  * IMPORTANT: In the agent-driven workflow, these are helper/documentation functions only.
  * The agent is responsible for actually running all git commands locally, not the tool.
@@ -10,7 +8,7 @@ import { spawn } from "child_process";
  * Documents how to run a git command and capture its output.
  * This is a reference function for the agent, not to be executed directly by the tool.
  */
-export async function runGitCommand(cmd: string, args: string[], options: object = {}): Promise<string> {
+export async function runGitCommand(cmd: string, args: string[]): Promise<string> {
   return `AGENT: Please run the following git command and return its output:
 ${cmd} ${args.join(' ')}`;
 }
@@ -119,7 +117,7 @@ export function extractRepoInfo(prUrl: string): RepoInfo | null {
     }
 
     return null;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

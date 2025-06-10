@@ -28,7 +28,7 @@ export async function ensureRulesFileExists(): Promise<void> {
   try {
     // 檢查 DATA_DIR 目錄中是否存在規則文件
     await fs.access(dataRulesPath);
-  } catch (error) {
+  } catch {
     // DATA_DIR 目錄中不存在規則文件
     await fs.mkdir(path.dirname(dataRulesPath), { recursive: true });
     await fs.writeFile(

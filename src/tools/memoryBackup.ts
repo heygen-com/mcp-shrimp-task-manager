@@ -134,7 +134,7 @@ export async function importMemories(params: z.infer<typeof importMemoriesSchema
     for (const memoryData of importData.memories) {
       try {
         // Convert date strings back to dates
-        const memory: any = {
+        const memory: Partial<Memory> & Record<string, unknown> = {
           ...memoryData,
           created: new Date(memoryData.created as string),
           lastAccessed: new Date(memoryData.lastAccessed as string),
@@ -158,7 +158,7 @@ export async function importMemories(params: z.infer<typeof importMemoriesSchema
         imported++;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errors.push(`Failed to import memory "${(memoryData as any).summary}": ${errorMsg}`);
+        errors.push(`Failed to import memory "${(memoryData as Record<string, unknown>).summary}": ${errorMsg}`);
         skipped++;
       }
     }

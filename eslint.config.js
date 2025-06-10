@@ -9,6 +9,19 @@ import { defineConfig } from "eslint/config";
 export default defineConfig([
   { files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"], plugins: { js }, extends: ["js/recommended"] },
   { files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"], languageOptions: { globals: globals.node } },
+  // Browser-specific files
+  { 
+    files: ["src/public/**/*.js", "docs/**/*.js"], 
+    languageOptions: { 
+      globals: {
+        ...globals.browser,
+        d3: "readonly",
+        EventSource: "readonly",
+        Prism: "readonly",
+        AOS: "readonly"
+      }
+    } 
+  },
   tseslint.configs.recommended,
   { files: ["**/*.json"], plugins: { json }, language: "json/json", extends: ["json/recommended"] },
   { files: ["**/*.jsonc"], plugins: { json }, language: "json/jsonc", extends: ["json/recommended"] },

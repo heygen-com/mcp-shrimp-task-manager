@@ -1,3 +1,5 @@
+/* eslint-env browser */
+
 // 全局變量
 let tasks = [];
 let selectedTaskId = null;
@@ -21,9 +23,6 @@ const progressInProgress = document.getElementById("progress-in-progress");
 const progressPending = document.getElementById("progress-pending");
 const progressLabels = document.getElementById("progress-labels");
 const dependencyGraphElement = document.getElementById("dependency-graph");
-const globalAnalysisResultElement = document.getElementById(
-  "global-analysis-result"
-); // 假設 HTML 中有這個元素
 const langSwitcher = document.getElementById("lang-switcher"); // << 新增：獲取切換器元素
 
 // 初始化
@@ -474,9 +473,10 @@ function renderTasks() {
         return (a.name || "").localeCompare(b.name || "");
       case "name-desc":
         return (b.name || "").localeCompare(a.name || "");
-      case "status":
+      case "status": {
         const statusOrder = { pending: 1, in_progress: 2, completed: 3 };
         return (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+      }
       case "date-asc":
         return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
       case "date-desc":
@@ -992,7 +992,7 @@ function renderDependencyGraph() {
       d.fy = event.y;
     }
 
-    function dragended(event, d) {
+    function dragended(event) {
       if (!event.active) simulation.alphaTarget(0);
       // 取消固定位置，讓節點可以繼續被力導引影響 (如果需要)
       // d.fx = null;
@@ -1156,7 +1156,7 @@ function renderGlobalAnalysisResult() {
 }
 
 // 新增：高亮依賴圖中的節點
-function highlightNode(taskId, status = null) {
+function highlightNode(taskId) {
   if (!g || !window.d3) return;
 
   // 清除所有節點的高亮
