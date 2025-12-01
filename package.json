@@ -35,7 +35,7 @@
     "@modelcontextprotocol/sdk": "^1.11.0",
     "axios": "^1.9.0",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "express": "^4.22.1",
     "fs-extra": "^11.2.0",
     "get-port": "^7.1.0",
     "node-fetch": "^3.3.2",
